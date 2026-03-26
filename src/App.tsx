@@ -21,7 +21,23 @@ import {
   User,
   Building2,
   Percent,
-  LogOut
+  LogOut,
+  Folder,
+  Home,
+  Plane,
+  Car,
+  ShoppingBag,
+  Heart,
+  Briefcase,
+  GraduationCap,
+  Dumbbell,
+  Palette,
+  Utensils,
+  Coffee,
+  Music,
+  Gamepad2,
+  Smartphone,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './contexts/AuthContext';
@@ -43,6 +59,13 @@ import {
 import LoginPage from './LoginPage';
 
 // --- Types ---
+interface Space {
+  id: string;
+  nombre: string;
+  icono: string;
+  color: string;
+}
+
 interface Invoice {
   id: string;
   numeroFactura: string;
@@ -53,9 +76,39 @@ interface Invoice {
   valorTotal: number;
   initials: string;
   color: string;
+  spaceId?: string | null;
 }
 
-const COLORS = [
+const SPACE_COLORS = [
+  { name: 'blue', bg: 'bg-blue-100', text: 'text-blue-600', border: 'border-blue-200' },
+  { name: 'orange', bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200' },
+  { name: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200' },
+  { name: 'emerald', bg: 'bg-emerald-100', text: 'text-emerald-600', border: 'border-emerald-200' },
+  { name: 'rose', bg: 'bg-rose-100', text: 'text-rose-600', border: 'border-rose-200' },
+  { name: 'amber', bg: 'bg-amber-100', text: 'text-amber-600', border: 'border-amber-200' },
+  { name: 'purple', bg: 'bg-purple-100', text: 'text-purple-600', border: 'border-purple-200' },
+  { name: 'teal', bg: 'bg-teal-100', text: 'text-teal-600', border: 'border-teal-200' },
+];
+
+const SPACE_ICONS: Record<string, React.ElementType> = {
+  folder: Folder,
+  home: Home,
+  plane: Plane,
+  car: Car,
+  shopping: ShoppingBag,
+  heart: Heart,
+  briefcase: Briefcase,
+  graduation: GraduationCap,
+  dumbbell: Dumbbell,
+  palette: Palette,
+  utensils: Utensils,
+  coffee: Coffee,
+  music: Music,
+  gamepad: Gamepad2,
+  smartphone: Smartphone,
+};
+
+const INVOICE_COLORS = [
   'bg-blue-100 text-blue-600',
   'bg-orange-100 text-orange-600',
   'bg-indigo-100 text-indigo-600',
@@ -63,6 +116,186 @@ const COLORS = [
   'bg-rose-100 text-rose-600',
   'bg-amber-100 text-amber-600',
 ];
+
+// --- Create Space Form Component ---
+interface CreateSpaceFormProps {
+  onSubmit: (space: Space) => void;
+  onCancel: () => void;
+}
+
+function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
+  const [nombre, setNombre] = useState('');
+  const [icono, setIcono] = useState('folder');
+  const [color, setColor] = useState('blue');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nombre.trim()) return;
+
+    onSubmit({
+      id: crypto.randomUUID(),
+      nombre: nombre.trim(),
+      icono,
+      color,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div>
+        <label className="block text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant mb-2">
+          Nombre del Espacio
+        </label>
+        <input
+          type="text"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          placeholder="ej. Vacaciones, Remodelación Casa..."
+          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
+          autoFocus
+        />
+      </div>
+
+      <div>
+        <label className="block text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant mb-3">
+          Ícono
+        </label>
+        <div className="grid grid-cols-8 gap-2">
+          {Object.entries(SPACE_ICONS).map(([key, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setIcono(key)}
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${
+                icono === key
+                  ? 'bg-primary text-white shadow-lg scale-110'
+                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+              }`}
+            >
+              <Icon className="w-5 h-5" />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant mb-3">
+          Color
+        </label>
+        <div className="grid grid-cols-8 gap-2">
+          {SPACE_COLORS.map((spaceColor) => (
+            <button
+              key={spaceColor.name}
+              type="button"
+              onClick={() => setColor(spaceColor.name)}
+              className={`h-10 rounded-xl ${spaceColor.bg} transition-all ${
+                color === spaceColor.name
+                  ? 'ring-2 ring-primary ring-offset-2 scale-110'
+                  : 'hover:scale-105'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-3 pt-4">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-3 px-4 rounded-xl font-bold bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={!nombre.trim()}
+          className="flex-1 btn-primary-gradient py-3 px-4 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Crear Espacio
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// --- Space Detail View Component ---
+interface SpaceDetailViewProps {
+  space: Space;
+  invoices: Invoice[];
+  onClose: () => void;
+  onDeleteInvoice: (id: string) => void;
+}
+
+function SpaceDetailView({ space, invoices, onClose, onDeleteInvoice }: SpaceDetailViewProps) {
+  const IconComponent = SPACE_ICONS[space.icono] || Folder;
+  const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
+  const totalGastado = invoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <div className={`w-16 h-16 ${spaceColor.bg} ${spaceColor.text} rounded-2xl flex items-center justify-center`}>
+            <IconComponent className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-extrabold text-primary">{space.nombre}</h2>
+            <p className="text-on-surface-variant">{invoices.length} facturas registradas</p>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 hover:bg-surface-container-low rounded-xl transition-colors"
+        >
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      <div className={`${spaceColor.bg} ${spaceColor.text} rounded-2xl p-6 mb-6`}>
+        <p className="text-[10px] uppercase tracking-[0.15em] font-bold opacity-70 mb-1">Total Gastado</p>
+        <p className="text-3xl font-extrabold">${totalGastado.toLocaleString('es-CL')}</p>
+      </div>
+
+      <div>
+        <h3 className="text-lg font-bold text-on-surface mb-4">Facturas del Espacio</h3>
+        {invoices.length === 0 ? (
+          <div className="text-center py-12 text-on-surface-variant">
+            <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p>No hay facturas en este espacio aún</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {invoices.map((invoice) => (
+              <div
+                key={invoice.id}
+                className="flex items-center justify-between bg-surface-container-low rounded-xl p-4"
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 ${invoice.color} rounded-xl flex items-center justify-center font-bold text-sm`}>
+                    {invoice.initials}
+                  </div>
+                  <div>
+                    <p className="font-bold text-on-surface">{invoice.proveedor}</p>
+                    <p className="text-xs text-on-surface-variant">{invoice.numeroFactura} • {invoice.fecha}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <p className="font-bold text-on-surface">${invoice.valorTotal.toLocaleString('es-CL')}</p>
+                  <button
+                    onClick={() => onDeleteInvoice(invoice.id)}
+                    className="p-2 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const { user, signOut, loading: authLoading } = useAuth();
@@ -96,7 +329,82 @@ export default function App() {
 
   // --- Invoices State & Persistence ---
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [spaces, setSpaces] = useState<Space[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // --- Spaces UI State ---
+  const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
+  const [selectedSpace, setSelectedSpace] = useState<Space | null>(null);
+
+  // Load spaces from Supabase when user logs in
+  useEffect(() => {
+    const loadSpaces = async () => {
+      if (!user) {
+        setSpaces([]);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('spaces')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (data) {
+          setSpaces(data);
+        }
+      } catch (error) {
+        console.error('Error loading spaces:', error);
+      }
+    };
+
+    loadSpaces();
+  }, [user]);
+
+  // Save space to Supabase
+  const saveSpace = async (space: Space) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('spaces')
+        .upsert({
+          id: space.id,
+          user_id: user.id,
+          nombre: space.nombre,
+          icono: space.icono,
+          color: space.color,
+        }, {
+          onConflict: 'id'
+        });
+      
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving space:', error);
+      // Rollback optimistic update
+      setSpaces(prev => prev.filter(s => s.id !== space.id));
+      alert('Error al guardar el espacio. Por favor, intenta de nuevo.');
+    }
+  };
+
+  // Delete space from Supabase
+  const deleteSpace = async (spaceId: string) => {
+    if (!user) return;
+
+    try {
+      await supabase
+        .from('spaces')
+        .delete()
+        .eq('id', spaceId);
+      
+      setSpaces(prev => prev.filter(s => s.id !== spaceId));
+    } catch (error) {
+      console.error('Error deleting space:', error);
+    }
+  };
 
   // Load invoices from Supabase when user logs in
   useEffect(() => {
@@ -118,14 +426,21 @@ export default function App() {
 
         if (data) {
           setInvoices(data.map(inv => ({
-            ...inv,
+            id: inv.id,
+            numeroFactura: inv.numero_factura,
+            fecha: inv.fecha,
+            proveedor: inv.proveedor,
+            valorNeto: Number(inv.valor_neto),
+            iva: Number(inv.iva),
+            valorTotal: Number(inv.valor_total),
             initials: inv.proveedor
               .split(' ')
-              .map(word => word[0])
+              .map((word: string) => word[0])
               .join('')
               .toUpperCase()
               .slice(0, 2),
-            color: COLORS[Math.floor(inv.id.charCodeAt(0) % COLORS.length)],
+            color: INVOICE_COLORS[Math.floor(inv.id.charCodeAt(0) % INVOICE_COLORS.length)],
+            spaceId: inv.space_id,
           })));
         }
       } catch (error) {
@@ -138,58 +453,6 @@ export default function App() {
     loadInvoices();
   }, [user]);
 
-  useEffect(() => {
-    const saveInvoices = async () => {
-      if (!user) return;
-
-      try {
-        // Delete invoices that no longer exist
-        const currentIds = invoices.map(inv => inv.id);
-        const { data: existingInvoices } = await supabase
-          .from('invoices')
-          .select('id')
-          .eq('user_id', user.id);
-
-        if (existingInvoices) {
-          const idsToDelete = existingInvoices
-            .filter(inv => !currentIds.includes(inv.id))
-            .map(inv => inv.id);
-
-          if (idsToDelete.length > 0) {
-            await supabase
-              .from('invoices')
-              .delete()
-              .in('id', idsToDelete);
-          }
-        }
-
-        // Upsert current invoices
-        for (const invoice of invoices) {
-          await supabase
-            .from('invoices')
-            .upsert({
-              id: invoice.id,
-              user_id: user.id,
-              numero_factura: invoice.numeroFactura,
-              fecha: invoice.fecha,
-              proveedor: invoice.proveedor,
-              valor_neto: invoice.valorNeto,
-              iva: invoice.iva,
-              valor_total: invoice.valorTotal,
-            }, {
-              onConflict: 'id'
-            });
-        }
-      } catch (error) {
-        console.error('Error saving invoices:', error);
-      }
-    };
-
-    if (!loading) {
-      saveInvoices();
-    }
-  }, [invoices, user, loading]);
-
   // --- Form State ---
   const [formData, setFormData] = useState({
     numeroFactura: '',
@@ -197,6 +460,7 @@ export default function App() {
     proveedor: '',
     valorNeto: '',
   });
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
 
   // --- Automatic Calculations ---
   const ivaRate = settings.ivaRate;
@@ -242,8 +506,8 @@ export default function App() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleRegisterInvoice = () => {
-    if (!formData.proveedor || !formData.valorNeto || !formData.numeroFactura) {
+  const handleRegisterInvoice = async () => {
+    if (!formData.proveedor || !formData.valorNeto || !formData.numeroFactura || !user) {
       return;
     }
 
@@ -254,7 +518,7 @@ export default function App() {
       .toUpperCase()
       .slice(0, 2);
 
-    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const randomColor = INVOICE_COLORS[Math.floor(Math.random() * INVOICE_COLORS.length)];
 
     const newInvoice: Invoice = {
       id: crypto.randomUUID(),
@@ -266,10 +530,36 @@ export default function App() {
       valorTotal: calculatedTotal,
       initials,
       color: randomColor,
+      spaceId: selectedSpaceId,
     };
 
-    setInvoices(prev => [newInvoice, ...prev]);
-    
+    try {
+      // Optimistic update
+      setInvoices(prev => [newInvoice, ...prev]);
+
+      const { error } = await supabase
+        .from('invoices')
+        .insert({
+          id: newInvoice.id,
+          user_id: user.id,
+          numero_factura: newInvoice.numeroFactura,
+          fecha: newInvoice.fecha,
+          proveedor: newInvoice.proveedor,
+          valor_neto: newInvoice.valorNeto,
+          iva: newInvoice.iva,
+          valor_total: newInvoice.valorTotal,
+          space_id: newInvoice.spaceId || null,
+        });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving invoice:', error);
+      // Rollback optimistic update
+      setInvoices(prev => prev.filter(inv => inv.id !== newInvoice.id));
+      alert('Error al guardar la factura. Por favor, intenta de nuevo.');
+      return;
+    }
+
     // Reset form (keep date)
     setFormData(prev => ({
       ...prev,
@@ -277,6 +567,7 @@ export default function App() {
       proveedor: '',
       valorNeto: '',
     }));
+    setSelectedSpaceId(null);
 
     // Focus back to invoice number for next entry
     invoiceNumberRef.current?.focus();
@@ -309,8 +600,28 @@ export default function App() {
     }
   };
 
-  const handleDeleteInvoice = (id: string) => {
-    setInvoices(prev => prev.filter(inv => inv.id !== id));
+  const handleDeleteInvoice = async (id: string) => {
+    if (!user) return;
+    
+    const invoiceToDelete = invoices.find(inv => inv.id === id);
+    if (!invoiceToDelete) return;
+
+    try {
+      // Optimistic update
+      setInvoices(prev => prev.filter(inv => inv.id !== id));
+
+      const { error } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting invoice:', error);
+      // Rollback
+      setInvoices(prev => [invoiceToDelete, ...prev].sort((a, b) => b.fecha.localeCompare(a.fecha)));
+      alert('Error al eliminar la factura.');
+    }
   };
 
   // Show login page if not authenticated
@@ -353,6 +664,7 @@ export default function App() {
         <nav className="flex-1 space-y-2">
           {[
             { name: 'Panel Control', icon: LayoutDashboard },
+            { name: 'Espacios', icon: Folder },
             { name: 'Facturas', icon: FileText },
             { name: 'Análisis', icon: BarChart3 },
             { name: 'Ajustes', icon: Settings },
@@ -361,8 +673,8 @@ export default function App() {
               key={item.name}
               onClick={() => setActiveTab(item.name)}
               className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 ${
-                activeTab === item.name 
-                  ? 'bg-surface-container-lowest text-primary shadow-sm border-r-4 border-primary' 
+                activeTab === item.name
+                  ? 'bg-surface-container-lowest text-primary shadow-sm border-r-4 border-primary'
                   : 'text-on-surface-variant hover:bg-surface-container-high/50 hover:text-on-surface'
               }`}
             >
@@ -537,6 +849,87 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'Espacios' && (
+              <motion.div
+                key="spaces"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-10"
+              >
+                <div className="flex items-end justify-between">
+                  <div>
+                    <h2 className="text-4xl font-extrabold text-primary tracking-tight">Espacios de Gastos</h2>
+                    <p className="text-on-surface-variant mt-2 text-lg">Organiza tus gastos por categorías personalizadas.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowCreateSpaceModal(true)}
+                    className="flex items-center gap-2 btn-primary-gradient px-6 py-3 rounded-xl font-bold"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span>Nuevo Espacio</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-12 gap-6">
+                  {/* All Spaces View */}
+                  <div className="col-span-12">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {spaces.map((space) => {
+                        const IconComponent = SPACE_ICONS[space.icono] || Folder;
+                        const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
+                        const spaceInvoices = invoices.filter(inv => inv.spaceId === space.id);
+                        const totalGastado = spaceInvoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
+
+                        return (
+                          <motion.div
+                            key={space.id}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => setSelectedSpace(space)}
+                            className={`${spaceColor.bg} ${spaceColor.text} rounded-[2rem] p-6 cursor-pointer border-2 ${spaceColor.border} transition-all hover:shadow-lg`}
+                          >
+                            <div className="flex items-start justify-between mb-4">
+                              <div className={`w-14 h-14 ${spaceColor.bg} rounded-2xl flex items-center justify-center`}>
+                                <IconComponent className="w-7 h-7" />
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteSpace(space.id);
+                                }}
+                                className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <h3 className="text-xl font-bold mb-1">{space.nombre}</h3>
+                            <p className="text-sm opacity-70 mb-3">{spaceInvoices.length} facturas</p>
+                            <p className="text-2xl font-extrabold">${totalGastado.toLocaleString('es-CL')}</p>
+                          </motion.div>
+                        );
+                      })}
+
+                      {/* Empty State */}
+                      {spaces.length === 0 && (
+                        <div className="col-span-full bg-surface-container-low rounded-[2rem] p-12 text-center">
+                          <Folder className="w-16 h-16 text-on-surface-variant mx-auto mb-4 opacity-30" />
+                          <h3 className="text-xl font-bold text-on-surface mb-2">Sin espacios</h3>
+                          <p className="text-on-surface-variant mb-6">Crea tu primer espacio para organizar tus gastos</p>
+                          <button
+                            onClick={() => setShowCreateSpaceModal(true)}
+                            className="btn-primary-gradient px-6 py-3 rounded-xl font-bold"
+                          >
+                            Crear primer espacio
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'Facturas' && (
               <motion.div
                 key="invoices"
@@ -629,12 +1022,47 @@ export default function App() {
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Valor Total</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">$</span>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             readOnly
                             value={calculatedTotal.toLocaleString('es-CL')}
-                            className="w-full bg-surface-container-high/30 border-none rounded-xl py-4 pl-10 pr-4 text-xl font-extrabold text-primary cursor-not-allowed" 
+                            className="w-full bg-surface-container-high/30 border-none rounded-xl py-4 pl-10 pr-4 text-xl font-extrabold text-primary cursor-not-allowed"
                           />
+                        </div>
+                      </div>
+                      <div className="col-span-2 space-y-2">
+                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Espacio (Opcional)</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSpaceId(null)}
+                            className={`py-3 px-4 rounded-xl font-medium transition-all ${
+                              selectedSpaceId === null
+                                ? 'bg-primary text-white shadow-md'
+                                : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                            }`}
+                          >
+                            Sin espacio
+                          </button>
+                          {spaces.map((space) => {
+                            const IconComponent = SPACE_ICONS[space.icono] || Folder;
+                            const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
+                            return (
+                              <button
+                                key={space.id}
+                                type="button"
+                                onClick={() => setSelectedSpaceId(space.id)}
+                                className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center gap-2 ${
+                                  selectedSpaceId === space.id
+                                    ? `${spaceColor.bg} ${spaceColor.text} ring-2 ring-primary shadow-md`
+                                    : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                                }`}
+                              >
+                                <IconComponent className="w-4 h-4" />
+                                <span className="truncate">{space.nombre}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -924,6 +1352,74 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Create Space Modal */}
+          <AnimatePresence>
+            {showCreateSpaceModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setShowCreateSpaceModal(false)}
+              >
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-surface-container-lowest rounded-[2rem] p-8 w-full max-w-lg shadow-2xl"
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-extrabold text-primary">Crear Nuevo Espacio</h2>
+                    <button
+                      onClick={() => setShowCreateSpaceModal(false)}
+                      className="p-2 hover:bg-surface-container-low rounded-xl transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <CreateSpaceForm
+                    onSubmit={(newSpace) => {
+                      setSpaces(prev => [...prev, newSpace]);
+                      saveSpace(newSpace);
+                      setShowCreateSpaceModal(false);
+                    }}
+                    onCancel={() => setShowCreateSpaceModal(false)}
+                  />
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Space Detail View Modal */}
+          <AnimatePresence>
+            {selectedSpace && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setSelectedSpace(null)}
+              >
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-surface-container-lowest rounded-[2rem] p-8 w-full max-w-4xl shadow-2xl max-h-[90vh] overflow-y-auto"
+                >
+                  <SpaceDetailView
+                    space={selectedSpace}
+                    invoices={invoices.filter(inv => inv.spaceId === selectedSpace.id)}
+                    onClose={() => setSelectedSpace(null)}
+                    onDeleteInvoice={handleDeleteInvoice}
+                  />
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>
