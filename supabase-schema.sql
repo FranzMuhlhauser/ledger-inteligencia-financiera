@@ -1,5 +1,25 @@
 -- Supabase Schema for Ledger - Inteligencia Financiera
 -- Run this SQL in your Supabase project's SQL Editor
+-- =====================================================
+-- v2 MIGRATION — Run if tables already exist
+-- =====================================================
+-- ALTER TABLE spaces ADD COLUMN IF NOT EXISTS presupuesto NUMERIC DEFAULT 0;
+-- ALTER TABLE invoices
+--   ADD COLUMN IF NOT EXISTS descripcion TEXT DEFAULT '',
+--   ADD COLUMN IF NOT EXISTS tipo_documento TEXT DEFAULT 'Factura',
+--   ADD COLUMN IF NOT EXISTS archivo_url TEXT,
+--   ADD COLUMN IF NOT EXISTS archivo_nombre TEXT;
+-- =====================================================
+-- Storage Bucket for receipts (run AFTER enabling Supabase Storage)
+-- =====================================================
+-- INSERT INTO storage.buckets (id, name, public)
+--   VALUES ('receipts', 'receipts', false)
+--   ON CONFLICT DO NOTHING;
+-- CREATE POLICY "Users manage own receipts"
+--   ON storage.objects FOR ALL
+--   USING (bucket_id = 'receipts' AND auth.uid()::text = (storage.foldername(name))[1])
+--   WITH CHECK (bucket_id = 'receipts' AND auth.uid()::text = (storage.foldername(name))[1]);
+-- =====================================================
 
 -- =====================================================
 -- MIGRATION FOR EXISTING PROJECTS
@@ -26,6 +46,7 @@ CREATE TABLE IF NOT EXISTS spaces (
   nombre TEXT NOT NULL,
   icono TEXT NOT NULL DEFAULT 'folder',
   color TEXT NOT NULL DEFAULT 'blue',
+  presupuesto NUMERIC DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -41,6 +62,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   iva NUMERIC NOT NULL DEFAULT 0,
   valor_total NUMERIC NOT NULL DEFAULT 0,
   space_id UUID REFERENCES spaces(id) ON DELETE SET NULL,
+  descripcion TEXT DEFAULT '',
+  tipo_documento TEXT DEFAULT 'Factura',
+  archivo_url TEXT,
+  archivo_nombre TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 

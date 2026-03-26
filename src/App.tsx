@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard,
   FileText,
@@ -8,16 +8,12 @@ import {
   Bell,
   HelpCircle,
   Calendar,
-  MoreVertical,
   Plus,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   TrendingUp,
   Upload,
   Trash2,
   DollarSign,
-  PieChart as PieChartIcon,
   User,
   Building2,
   Percent,
@@ -37,8 +33,17 @@ import {
   Music,
   Gamepad2,
   Smartphone,
-  X
+  X,
+  Pencil,
+  AlertTriangle,
+  Download,
+  FileDown,
+  CheckCircle2,
+  Paperclip
 } from 'lucide-react';
+import EditSpaceModal from './components/EditSpaceModal';
+import InvoiceDetailModal from './components/InvoiceDetailModal';
+import { exportToCSV, exportToPDF } from './utils/export';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
@@ -64,6 +69,7 @@ interface Space {
   nombre: string;
   icono: string;
   color: string;
+  presupuesto?: number;
 }
 
 interface Invoice {
@@ -77,6 +83,10 @@ interface Invoice {
   initials: string;
   color: string;
   spaceId?: string | null;
+  descripcion?: string;
+  tipoDocumento?: string;
+  archivoUrl?: string;
+  archivoNombre?: string;
 }
 
 const SPACE_COLORS = [
@@ -127,6 +137,7 @@ function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
   const [nombre, setNombre] = useState('');
   const [icono, setIcono] = useState('folder');
   const [color, setColor] = useState('blue');
+  const [presupuesto, setPresupuesto] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +148,7 @@ function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
       nombre: nombre.trim(),
       icono,
       color,
+      presupuesto: parseFloat(presupuesto) || 0,
     });
   };
 
@@ -154,6 +166,22 @@ function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
           className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
           autoFocus
         />
+      </div>
+
+      <div>
+        <label className="block text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant mb-2">
+          Presupuesto Máximo (Opcional)
+        </label>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant font-bold">$</span>
+          <input
+            type="number"
+            value={presupuesto}
+            onChange={(e) => setPresupuesto(e.target.value)}
+            placeholder="0"
+            className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 pl-8 pr-4 focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
       </div>
 
       <div>
@@ -331,64 +359,65 @@ export default function App() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // --- Spaces UI State ---
+
+  // --- UI State ---
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
   const [selectedSpace, setSelectedSpace] = useState<Space | null>(null);
+  const [editingSpace, setEditingSpace] = useState<Space | null>(null);
+  const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
+
+  // --- Date Filter State (for Analysis tab) ---
+  const today = new Date().toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  // --- Alert threshold (from settings localStorage) ---
+  const alertThreshold = (settings as any).alertThreshold ?? 80;
 
   // Load spaces from Supabase when user logs in
   useEffect(() => {
     const loadSpaces = async () => {
-      if (!user) {
-        setSpaces([]);
-        return;
-      }
-
+      if (!user) { setSpaces([]); return; }
       try {
         const { data, error } = await supabase
-          .from('spaces')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: true });
-
+          .from('spaces').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
         if (error) throw error;
-
-        if (data) {
-          setSpaces(data);
-        }
-      } catch (error) {
-        console.error('Error loading spaces:', error);
-      }
+        if (data) setSpaces(data.map(s => ({ ...s, presupuesto: Number(s.presupuesto ?? 0) })));
+      } catch (error) { console.error('Error loading spaces:', error); }
     };
-
     loadSpaces();
   }, [user]);
 
-  // Save space to Supabase
+  // Save NEW space to Supabase
   const saveSpace = async (space: Space) => {
     if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from('spaces')
-        .insert({
-          user_id: user.id,
-          nombre: space.nombre,
-          icono: space.icono,
-          color: space.color,
-        })
-        .select()
-        .single();
-
+        .insert({ user_id: user.id, nombre: space.nombre, icono: space.icono, color: space.color, presupuesto: space.presupuesto ?? 0 })
+        .select().single();
       if (error) throw error;
-      
-      // Update the space with the generated ID from the database
-      setSpaces(prev => prev.map(s => s.id === space.id ? { ...data } : s));
+      setSpaces(prev => prev.map(s => s.id === space.id ? { ...data, presupuesto: Number(data.presupuesto ?? 0) } : s));
     } catch (error) {
       console.error('Error saving space:', error);
-      // Rollback optimistic update
       setSpaces(prev => prev.filter(s => s.id !== space.id));
       alert('Error al guardar el espacio. Por favor, intenta de nuevo.');
+    }
+  };
+
+  // Update EXISTING space in Supabase
+  const updateSpace = async (updated: Space) => {
+    if (!user) return;
+    setSpaces(prev => prev.map(s => s.id === updated.id ? updated : s)); // optimistic
+    try {
+      const { error } = await supabase
+        .from('spaces')
+        .update({ nombre: updated.nombre, icono: updated.icono, color: updated.color, presupuesto: updated.presupuesto ?? 0 })
+        .eq('id', updated.id);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating space:', error);
+      alert('Error al actualizar el espacio.');
     }
   };
 
@@ -423,21 +452,11 @@ export default function App() {
   // Load invoices from Supabase when user logs in
   useEffect(() => {
     const loadInvoices = async () => {
-      if (!user) {
-        setInvoices([]);
-        setLoading(false);
-        return;
-      }
-
+      if (!user) { setInvoices([]); setLoading(false); return; }
       try {
         const { data, error } = await supabase
-          .from('invoices')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
-
+          .from('invoices').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
         if (error) throw error;
-
         if (data) {
           setInvoices(data.map(inv => ({
             id: inv.id,
@@ -447,23 +466,18 @@ export default function App() {
             valorNeto: Number(inv.valor_neto),
             iva: Number(inv.iva),
             valorTotal: Number(inv.valor_total),
-            initials: inv.proveedor
-              .split(' ')
-              .map((word: string) => word[0])
-              .join('')
-              .toUpperCase()
-              .slice(0, 2),
+            initials: inv.proveedor.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2),
             color: INVOICE_COLORS[Math.floor(inv.id.charCodeAt(0) % INVOICE_COLORS.length)],
             spaceId: inv.space_id,
+            descripcion: inv.descripcion || '',
+            tipoDocumento: inv.tipo_documento || 'Factura',
+            archivoUrl: inv.archivo_url || '',
+            archivoNombre: inv.archivo_nombre || '',
           })));
         }
-      } catch (error) {
-        console.error('Error loading invoices:', error);
-      } finally {
-        setLoading(false);
-      }
+      } catch (error) { console.error('Error loading invoices:', error); }
+      finally { setLoading(false); }
     };
-
     loadInvoices();
   }, [user]);
 
@@ -473,8 +487,11 @@ export default function App() {
     fecha: new Date().toISOString().split('T')[0],
     proveedor: '',
     valorNeto: '',
+    descripcion: '',
+    tipoDocumento: 'Factura',
   });
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [fileToUpload, setFileToUpload] = useState<File | null>(null);
 
   // --- Automatic Calculations ---
   const ivaRate = settings.ivaRate;
@@ -490,8 +507,16 @@ export default function App() {
   const activeInvoicesCount = invoices.length;
 
   // --- Analysis Data ---
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      if (dateFrom && inv.fecha < dateFrom) return false;
+      if (dateTo && inv.fecha > dateTo) return false;
+      return true;
+    });
+  }, [invoices, dateFrom, dateTo]);
+
   const chartData = useMemo(() => {
-    const grouped = invoices.reduce((acc: any, inv) => {
+    const grouped = filteredInvoices.reduce((acc: any, inv) => {
       const month = inv.fecha.slice(0, 7); // YYYY-MM
       acc[month] = (acc[month] || 0) + inv.valorTotal;
       return acc;
@@ -500,10 +525,10 @@ export default function App() {
     return Object.entries(grouped)
       .map(([name, total]) => ({ name, total: total as number }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [invoices]);
+  }, [filteredInvoices]);
 
   const providerData = useMemo(() => {
-    const grouped = invoices.reduce((acc: any, inv) => {
+    const grouped = filteredInvoices.reduce((acc: any, inv) => {
       acc[inv.proveedor] = (acc[inv.proveedor] || 0) + inv.valorTotal;
       return acc;
     }, {});
@@ -512,7 +537,7 @@ export default function App() {
       .map(([name, value]) => ({ name, value: value as number }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
-  }, [invoices]);
+  }, [filteredInvoices]);
 
   // --- Handlers ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -545,7 +570,34 @@ export default function App() {
       initials,
       color: randomColor,
       spaceId: selectedSpaceId,
+      descripcion: formData.descripcion,
+      tipoDocumento: formData.tipoDocumento,
     };
+
+    // Validate file before uploading
+    let archivoUrl = '';
+    let archivoNombre = '';
+    if (fileToUpload) {
+      const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+      if (!allowed.includes(fileToUpload.type)) {
+        alert('Tipo de archivo no permitido. Solo PDF, JPG o PNG.');
+        return;
+      }
+      if (fileToUpload.size > 5 * 1024 * 1024) {
+        alert('El archivo no puede superar 5 MB.');
+        return;
+      }
+      const path = `${user.id}/${newInvoice.id}-${fileToUpload.name}`;
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(path, fileToUpload);
+      if (uploadError) {
+        alert('Error al subir el archivo. Verifica que el bucket "receipts" exista en Supabase Storage.');
+        return;
+      }
+      archivoUrl = path;
+      archivoNombre = fileToUpload.name;
+      newInvoice.archivoUrl = archivoUrl;
+      newInvoice.archivoNombre = archivoNombre;
+    }
 
     try {
       // Optimistic update
@@ -563,29 +615,29 @@ export default function App() {
           iva: newInvoice.iva,
           valor_total: newInvoice.valorTotal,
           space_id: newInvoice.spaceId || null,
+          descripcion: newInvoice.descripcion,
+          tipo_documento: newInvoice.tipoDocumento,
+          archivo_url: archivoUrl || null,
+          archivo_nombre: archivoNombre || null,
         });
 
       if (error) throw error;
     } catch (error) {
       console.error('Error saving invoice:', error);
-      // Rollback optimistic update
       setInvoices(prev => prev.filter(inv => inv.id !== newInvoice.id));
       alert('Error al guardar la factura. Por favor, intenta de nuevo.');
       return;
     }
 
     // Reset form (keep date)
-    setFormData(prev => ({
-      ...prev,
-      numeroFactura: '',
-      proveedor: '',
-      valorNeto: '',
-    }));
+    setFormData(prev => ({ ...prev, numeroFactura: '', proveedor: '', valorNeto: '', descripcion: '', tipoDocumento: 'Factura' }));
     setSelectedSpaceId(null);
+    setFileToUpload(null);
 
     // Focus back to invoice number for next entry
     invoiceNumberRef.current?.focus();
   };
+
 
   const handleSaveSettings = () => {
     setSettings(tempSettings);
@@ -863,86 +915,129 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'Espacios' && (
-              <motion.div
-                key="spaces"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-10"
-              >
-                <div className="flex items-end justify-between">
-                  <div>
-                    <h2 className="text-4xl font-extrabold text-primary tracking-tight">Espacios de Gastos</h2>
-                    <p className="text-on-surface-variant mt-2 text-lg">Organiza tus gastos por categorías personalizadas.</p>
-                  </div>
-                  <button
-                    onClick={() => setShowCreateSpaceModal(true)}
-                    className="flex items-center gap-2 btn-primary-gradient px-6 py-3 rounded-xl font-bold"
+              {activeTab === 'Espacios' && (() => {
+                // Compute budget alerts
+                const budgetAlerts = spaces.filter(s => {
+                  if (!s.presupuesto || s.presupuesto <= 0) return false;
+                  const gastado = invoices.filter(i => i.spaceId === s.id).reduce((sum, i) => sum + i.valorTotal, 0);
+                  return (gastado / s.presupuesto) * 100 >= alertThreshold;
+                });
+                return (
+                  <motion.div
+                    key="spaces"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="space-y-10"
                   >
-                    <Plus className="w-5 h-5" />
-                    <span>Nuevo Espacio</span>
-                  </button>
-                </div>
+                    <div className="flex items-end justify-between">
+                      <div>
+                        <h2 className="text-4xl font-extrabold text-primary tracking-tight">Espacios de Gastos</h2>
+                        <p className="text-on-surface-variant mt-2 text-lg">Organiza tus gastos por categorías personalizadas.</p>
+                      </div>
+                      <button
+                        onClick={() => setShowCreateSpaceModal(true)}
+                        className="flex items-center gap-2 btn-primary-gradient px-6 py-3 rounded-xl font-bold"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span>Nuevo Espacio</span>
+                      </button>
+                    </div>
 
-                <div className="grid grid-cols-12 gap-6">
-                  {/* All Spaces View */}
-                  <div className="col-span-12">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {spaces.map((space) => {
-                        const IconComponent = SPACE_ICONS[space.icono] || Folder;
-                        const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
-                        const spaceInvoices = invoices.filter(inv => inv.spaceId === space.id);
-                        const totalGastado = spaceInvoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
+                    {/* Alert Banner */}
+                    {budgetAlerts.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-bold text-amber-800 text-sm">Alertas de Presupuesto</p>
+                          <p className="text-amber-700 text-sm">
+                            {budgetAlerts.map(s => s.nombre).join(', ')} {budgetAlerts.length === 1 ? 'ha' : 'han'} alcanzado el {alertThreshold}% del presupuesto.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
-                        return (
-                          <motion.div
-                            key={space.id}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => setSelectedSpace(space)}
-                            className={`${spaceColor.bg} ${spaceColor.text} rounded-[2rem] p-6 cursor-pointer border-2 ${spaceColor.border} transition-all hover:shadow-lg`}
-                          >
-                            <div className="flex items-start justify-between mb-4">
-                              <div className={`w-14 h-14 ${spaceColor.bg} rounded-2xl flex items-center justify-center`}>
-                                <IconComponent className="w-7 h-7" />
-                              </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteSpace(space.id);
-                                }}
-                                className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                    <div className="grid grid-cols-12 gap-6">
+                      <div className="col-span-12">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {spaces.map((space) => {
+                            const IconComponent = SPACE_ICONS[space.icono] || Folder;
+                            const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
+                            const spaceInvoices = invoices.filter(inv => inv.spaceId === space.id);
+                            const totalGastado = spaceInvoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
+                            const presupuesto = space.presupuesto ?? 0;
+                            const pct = presupuesto > 0 ? Math.min((totalGastado / presupuesto) * 100, 100) : 0;
+                            const barColor = pct >= 100 ? 'bg-red-500' : pct >= alertThreshold ? 'bg-amber-400' : 'bg-emerald-500';
+
+                            return (
+                              <motion.div
+                                key={space.id}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => setSelectedSpace(space)}
+                                className={`${spaceColor.bg} ${spaceColor.text} rounded-[2rem] p-6 cursor-pointer border-2 ${spaceColor.border} transition-all hover:shadow-lg`}
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <div className="flex items-start justify-between mb-4">
+                                  <div className={`w-14 h-14 ${spaceColor.bg} rounded-2xl flex items-center justify-center`}>
+                                    <IconComponent className="w-7 h-7" />
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setEditingSpace(space); }}
+                                      className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                                      title="Editar espacio"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); deleteSpace(space.id); }}
+                                      className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                                <h3 className="text-xl font-bold mb-1">{space.nombre}</h3>
+                                <p className="text-sm opacity-70 mb-2">{spaceInvoices.length} facturas</p>
+                                <p className="text-2xl font-extrabold mb-3">${totalGastado.toLocaleString('es-CL')}</p>
+                                {presupuesto > 0 && (
+                                  <div>
+                                    <div className="flex justify-between text-xs font-semibold mb-1 opacity-80">
+                                      <span>Presupuesto: ${presupuesto.toLocaleString('es-CL')}</span>
+                                      <span>{Math.round((totalGastado / presupuesto) * 100)}%</span>
+                                    </div>
+                                    <div className="h-2 bg-black/10 rounded-full overflow-hidden">
+                                      <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${pct}%` }}
+                                        transition={{ duration: 0.6 }}
+                                        className={`h-full rounded-full ${barColor}`}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </motion.div>
+                            );
+                          })}
+
+                          {/* Empty State */}
+                          {spaces.length === 0 && (
+                            <div className="col-span-full bg-surface-container-low rounded-[2rem] p-12 text-center">
+                              <Folder className="w-16 h-16 text-on-surface-variant mx-auto mb-4 opacity-30" />
+                              <h3 className="text-xl font-bold text-on-surface mb-2">Sin espacios</h3>
+                              <p className="text-on-surface-variant mb-6">Crea tu primer espacio para organizar tus gastos</p>
+                              <button onClick={() => setShowCreateSpaceModal(true)} className="btn-primary-gradient px-6 py-3 rounded-xl font-bold">
+                                Crear primer espacio
                               </button>
                             </div>
-                            <h3 className="text-xl font-bold mb-1">{space.nombre}</h3>
-                            <p className="text-sm opacity-70 mb-3">{spaceInvoices.length} facturas</p>
-                            <p className="text-2xl font-extrabold">${totalGastado.toLocaleString('es-CL')}</p>
-                          </motion.div>
-                        );
-                      })}
-
-                      {/* Empty State */}
-                      {spaces.length === 0 && (
-                        <div className="col-span-full bg-surface-container-low rounded-[2rem] p-12 text-center">
-                          <Folder className="w-16 h-16 text-on-surface-variant mx-auto mb-4 opacity-30" />
-                          <h3 className="text-xl font-bold text-on-surface mb-2">Sin espacios</h3>
-                          <p className="text-on-surface-variant mb-6">Crea tu primer espacio para organizar tus gastos</p>
-                          <button
-                            onClick={() => setShowCreateSpaceModal(true)}
-                            className="btn-primary-gradient px-6 py-3 rounded-xl font-bold"
-                          >
-                            Crear primer espacio
-                          </button>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+                  </motion.div>
+                );
+              })()}
+
 
             {activeTab === 'Facturas' && (
               <motion.div
@@ -957,9 +1052,25 @@ export default function App() {
                     <h2 className="text-4xl font-extrabold text-primary tracking-tight">Gestión de Facturas</h2>
                     <p className="text-on-surface-variant mt-2 text-lg">Captura y rastrea tus gastos operativos con precisión.</p>
                   </div>
-                  <div className="flex items-center gap-2 bg-surface-container-low px-4 py-2 rounded-xl text-primary font-bold text-sm">
-                    <Calendar className="w-4 h-4" />
-                    <span className="uppercase tracking-widest">{new Date().toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }).toUpperCase()}</span>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => exportToCSV(invoices)}
+                      className="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-xl text-on-surface font-bold text-sm hover:bg-surface-container-highest transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>CSV</span>
+                    </button>
+                    <button
+                      onClick={() => exportToPDF(invoices)}
+                      className="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-xl text-on-surface font-bold text-sm hover:bg-surface-container-highest transition-colors"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      <span>PDF</span>
+                    </button>
+                    <div className="flex items-center gap-2 bg-surface-container-low px-4 py-2 rounded-xl text-primary font-bold text-sm ml-2">
+                      <Calendar className="w-4 h-4" />
+                      <span className="uppercase tracking-widest">{new Date().toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }).toUpperCase()}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -974,7 +1085,19 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-x-8 gap-y-6">
                       <div className="space-y-2">
-                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Nº de Factura</label>
+                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Tipo de Documento</label>
+                        <select
+                          name="tipoDocumento"
+                          value={formData.tipoDocumento}
+                          onChange={handleInputChange}
+                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                        >
+                          <option value="Factura">Factura</option>
+                          <option value="Boleta">Boleta</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Nº de Documento</label>
                         <input 
                           ref={invoiceNumberRef}
                           type="text" 
@@ -1004,6 +1127,26 @@ export default function App() {
                           onChange={handleInputChange}
                           placeholder="ej. Global Logistics Corp" 
                           className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-2">
+                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Descripción / Nota</label>
+                        <input 
+                          type="text" 
+                          name="descripcion"
+                          value={formData.descripcion}
+                          onChange={handleInputChange}
+                          placeholder="ej. Compra de materiales de oficina..." 
+                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-2">
+                        <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Archivo Adjunto (Opcional)</label>
+                        <input 
+                          type="file" 
+                          accept=".pdf,image/jpeg,image/png,image/webp"
+                          onChange={(e) => setFileToUpload(e.target.files?.[0] || null)}
+                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/90 cursor-pointer" 
                         />
                       </div>
                       <div className="space-y-2">
@@ -1155,9 +1298,13 @@ export default function App() {
                                 initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 exit={{ opacity: 0, x: 10 }}
-                                className="group hover:bg-surface-container-low/30 transition-colors"
+                                onClick={() => setDetailInvoice(invoice)}
+                                className="group hover:bg-surface-container-low/30 transition-colors cursor-pointer"
                               >
-                                <td className="py-6 px-8 text-sm font-bold text-primary">{invoice.numeroFactura}</td>
+                                <td className="py-6 px-8 text-sm font-bold text-primary">
+                                  {invoice.numeroFactura}
+                                  {invoice.archivoUrl && <Paperclip className="inline-block ml-2 w-3.5 h-3.5 text-on-surface-variant" />}
+                                </td>
                                 <td className="py-6 px-8 text-sm font-medium text-on-surface">{invoice.fecha}</td>
                                 <td className="py-6 px-8">
                                   <div className="flex items-center gap-3">
@@ -1172,7 +1319,7 @@ export default function App() {
                                 <td className="py-6 px-8 text-sm font-extrabold text-primary text-right">${invoice.valorTotal.toLocaleString('es-CL')}</td>
                                 <td className="py-6 px-8 text-center">
                                   <button 
-                                    onClick={() => handleDeleteInvoice(invoice.id)}
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteInvoice(invoice.id); }}
                                     className="p-2 text-on-surface-variant hover:bg-rose-50 hover:text-rose-600 rounded-lg transition-colors"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -1201,6 +1348,34 @@ export default function App() {
                   <div>
                     <h2 className="text-4xl font-extrabold text-primary tracking-tight">Análisis Detallado</h2>
                     <p className="text-on-surface-variant mt-2 text-lg">Visualiza tendencias y patrones en tus gastos.</p>
+                  </div>
+                  <div className="flex items-center gap-4 bg-surface-container-lowest p-2 rounded-2xl shadow-sm border border-surface-container-low">
+                    <div className="flex items-center gap-2 px-3">
+                      <Calendar className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Filtro:</span>
+                    </div>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="bg-surface-container-low border-none rounded-xl py-2 px-3 text-sm focus:ring-2 focus:ring-primary/20"
+                    />
+                    <span className="text-on-surface-variant text-sm font-medium">-</span>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="bg-surface-container-low border-none rounded-xl py-2 px-3 text-sm focus:ring-2 focus:ring-primary/20"
+                    />
+                    {(dateFrom || dateTo) && (
+                      <button
+                        onClick={() => { setDateFrom(''); setDateTo(''); }}
+                        className="p-2 hover:bg-surface-container-high rounded-xl text-on-surface-variant transition-colors"
+                        title="Limpiar filtros"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1435,6 +1610,35 @@ export default function App() {
                   />
                 </motion.div>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Edit Space Modal */}
+          <AnimatePresence>
+            {editingSpace && (
+              <EditSpaceModal
+                space={editingSpace}
+                onClose={() => setEditingSpace(null)}
+                onSave={(updated) => {
+                  updateSpace(updated);
+                  setEditingSpace(null);
+                }}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* Invoice Detail Modal */}
+          <AnimatePresence>
+            {detailInvoice && (
+              <InvoiceDetailModal
+                invoice={detailInvoice}
+                space={spaces.find(s => s.id === detailInvoice.spaceId)}
+                onClose={() => setDetailInvoice(null)}
+                onDelete={(id) => {
+                  handleDeleteInvoice(id);
+                  setDetailInvoice(null);
+                }}
+              />
             )}
           </AnimatePresence>
         </div>
