@@ -396,15 +396,27 @@ export default function App() {
   const deleteSpace = async (spaceId: string) => {
     if (!user) return;
 
+    // Confirm before deleting
+    if (!window.confirm('¿Estás seguro de que quieres eliminar este espacio? Las facturas asociadas quedarán sin categoría.')) {
+      return;
+    }
+
     try {
-      await supabase
+      const { error } = await supabase
         .from('spaces')
         .delete()
         .eq('id', spaceId);
-      
+
+      if (error) {
+        console.error('Error deleting space:', error);
+        alert('Error al eliminar el espacio. Por favor, intenta de nuevo.');
+        return;
+      }
+
       setSpaces(prev => prev.filter(s => s.id !== spaceId));
     } catch (error) {
       console.error('Error deleting space:', error);
+      alert('Error al eliminar el espacio. Por favor, intenta de nuevo.');
     }
   };
 
