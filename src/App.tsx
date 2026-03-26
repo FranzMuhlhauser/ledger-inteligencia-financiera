@@ -369,19 +369,21 @@ export default function App() {
     if (!user) return;
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('spaces')
-        .upsert({
-          id: space.id,
+        .insert({
           user_id: user.id,
           nombre: space.nombre,
           icono: space.icono,
           color: space.color,
-        }, {
-          onConflict: 'id'
-        });
-      
+        })
+        .select()
+        .single();
+
       if (error) throw error;
+      
+      // Update the space with the generated ID from the database
+      setSpaces(prev => prev.map(s => s.id === space.id ? { ...data } : s));
     } catch (error) {
       console.error('Error saving space:', error);
       // Rollback optimistic update
