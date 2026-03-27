@@ -43,9 +43,14 @@ import {
 } from 'lucide-react';
 import EditSpaceModal from './components/EditSpaceModal';
 import InvoiceDetailModal from './components/InvoiceDetailModal';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import { exportToCSV, exportToPDF } from './utils/export';
+import { processFileForUpload } from './utils/imageCompression';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './contexts/AuthContext';
+import { useToast } from './contexts/ToastContext';
+import { useLazyLoad } from './hooks/useLazyLoad';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { supabase } from './lib/supabase';
 import {
   BarChart,
@@ -327,8 +332,59 @@ function SpaceDetailView({ space, invoices, onClose, onDeleteInvoice }: SpaceDet
 
 export default function App() {
   const { user, signOut, loading: authLoading } = useAuth();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('Panel Control');
   const invoiceNumberRef = React.useRef<HTMLInputElement>(null);
+  
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    {
+      key: 'n',
+      ctrl: true,
+      callback: () => {
+        setActiveTab('Facturas');
+        setTimeout(() => {
+          invoiceNumberRef.current?.focus();
+        }, 100);
+      },
+    },
+    {
+      key: '1',
+      callback: () => setActiveTab('Panel Control'),
+    },
+    {
+      key: '2',
+      callback: () => setActiveTab('Espacios'),
+    },
+    {
+      key: '3',
+      callback: () => setActiveTab('Facturas'),
+    },
+    {
+      key: '4',
+      callback: () => setActiveTab('Análisis'),
+    },
+    {
+      key: '5',
+      callback: () => setActiveTab('Ajustes'),
+    },
+    {
+      key: '/',
+      callback: () => {
+        const searchInput = document.querySelector('input[placeholder="Buscar facturas..."]') as HTMLInputElement;
+        searchInput?.focus();
+      },
+    },
+    {
+      key: '?',
+      shift: true,
+      callback: () => setShowKeyboardShortcutsModal(true),
+    },
+    {
+      key: '?',
+      callback: () => setShowKeyboardShortcutsModal(true),
+    },
+  ]);
 
   // --- Settings State ---
   const [settings, setSettings] = useState(() => {
@@ -365,6 +421,8 @@ export default function App() {
   const [selectedSpace, setSelectedSpace] = useState<Space | null>(null);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
+  const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // --- Date Filter State (for Analysis tab) ---
   const today = new Date().toISOString().split('T')[0];
@@ -398,10 +456,11 @@ export default function App() {
         .select().single();
       if (error) throw error;
       setSpaces(prev => prev.map(s => s.id === space.id ? { ...data, presupuesto: Number(data.presupuesto ?? 0) } : s));
+      toast.showSuccess('Espacio creado exitosamente');
     } catch (error) {
       console.error('Error saving space:', error);
       setSpaces(prev => prev.filter(s => s.id !== space.id));
-      alert('Error al guardar el espacio. Por favor, intenta de nuevo.');
+      toast.showError('Error al guardar el espacio. Por favor, intenta de nuevo.');
     }
   };
 
@@ -415,9 +474,10 @@ export default function App() {
         .update({ nombre: updated.nombre, icono: updated.icono, color: updated.color, presupuesto: updated.presupuesto ?? 0 })
         .eq('id', updated.id);
       if (error) throw error;
+      toast.showSuccess('Espacio actualizado correctamente');
     } catch (error) {
       console.error('Error updating space:', error);
-      alert('Error al actualizar el espacio.');
+      toast.showError('Error al actualizar el espacio.');
     }
   };
 
@@ -438,14 +498,15 @@ export default function App() {
 
       if (error) {
         console.error('Error deleting space:', error);
-        alert('Error al eliminar el espacio. Por favor, intenta de nuevo.');
+        toast.showError('Error al eliminar el espacio. Por favor, intenta de nuevo.');
         return;
       }
 
       setSpaces(prev => prev.filter(s => s.id !== spaceId));
+      toast.showSuccess('Espacio eliminado correctamente');
     } catch (error) {
       console.error('Error deleting space:', error);
-      alert('Error al eliminar el espacio. Por favor, intenta de nuevo.');
+      toast.showError('Error al eliminar el espacio. Por favor, intenta de nuevo.');
     }
   };
 
@@ -492,6 +553,35 @@ export default function App() {
   });
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [fileToUpload, setFileToUpload] = useState<File | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // --- Form Validation ---
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+    
+    if (!formData.numeroFactura.trim()) {
+      errors.numeroFactura = 'El número de documento es requerido';
+    } else if (formData.numeroFactura.trim().length < 3) {
+      errors.numeroFactura = 'Mínimo 3 caracteres';
+    }
+    
+    if (!formData.proveedor.trim()) {
+      errors.proveedor = 'El proveedor es requerido';
+    } else if (formData.proveedor.trim().length < 3) {
+      errors.proveedor = 'Mínimo 3 caracteres';
+    }
+    
+    if (!formData.valorNeto || isNaN(parseFloat(formData.valorNeto)) || parseFloat(formData.valorNeto) <= 0) {
+      errors.valorNeto = 'Ingrese un valor neto válido mayor a 0';
+    }
+    
+    if (!formData.fecha) {
+      errors.fecha = 'La fecha es requerida';
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   // --- Automatic Calculations ---
   const ivaRate = settings.ivaRate;
@@ -508,12 +598,27 @@ export default function App() {
 
   // --- Analysis Data ---
   const filteredInvoices = useMemo(() => {
-    return invoices.filter(inv => {
+    let result = invoices.filter(inv => {
       if (dateFrom && inv.fecha < dateFrom) return false;
       if (dateTo && inv.fecha > dateTo) return false;
       return true;
     });
-  }, [invoices, dateFrom, dateTo]);
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(inv => 
+        inv.numeroFactura.toLowerCase().includes(query) ||
+        inv.proveedor.toLowerCase().includes(query) ||
+        inv.descripcion?.toLowerCase().includes(query)
+      );
+    }
+    
+    return result;
+  }, [invoices, dateFrom, dateTo, searchQuery]);
+
+  // Lazy loading for invoices table
+  const { visibleItems: visibleInvoices, sentinelRef: invoicesSentinelRef } = useLazyLoad(filteredInvoices.length, { initialVisible: 50 });
 
   const chartData = useMemo(() => {
     const grouped = filteredInvoices.reduce((acc: any, inv) => {
@@ -546,7 +651,13 @@ export default function App() {
   };
 
   const handleRegisterInvoice = async () => {
-    if (!formData.proveedor || !formData.valorNeto || !formData.numeroFactura || !user) {
+    // Validate form before submitting
+    if (!validateForm()) {
+      toast.showError('Por favor corrija los errores en el formulario');
+      return;
+    }
+    
+    if (!user) {
       return;
     }
 
@@ -580,23 +691,35 @@ export default function App() {
     if (fileToUpload) {
       const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
       if (!allowed.includes(fileToUpload.type)) {
-        alert('Tipo de archivo no permitido. Solo PDF, JPG o PNG.');
+        toast.showError('Tipo de archivo no permitido. Solo PDF, JPG o PNG.');
         return;
       }
       if (fileToUpload.size > 5 * 1024 * 1024) {
-        alert('El archivo no puede superar 5 MB.');
+        toast.showError('El archivo no puede superar 5 MB.');
         return;
       }
-      const path = `${user.id}/${newInvoice.id}-${fileToUpload.name}`;
-      const { error: uploadError } = await supabase.storage.from('receipts').upload(path, fileToUpload);
-      if (uploadError) {
-        alert('Error al subir el archivo. Verifica que el bucket "receipts" exista en Supabase Storage.');
+      
+      try {
+        // Compress image files before upload
+        const fileToSave = fileToUpload.type.startsWith('image/')
+          ? await processFileForUpload(fileToUpload, 2)
+          : fileToUpload;
+        
+        const path = `${user.id}/${newInvoice.id}-${fileToSave.name}`;
+        const { error: uploadError } = await supabase.storage.from('receipts').upload(path, fileToSave);
+        if (uploadError) {
+          toast.showError('Error al subir el archivo. Verifica que el bucket "receipts" exista en Supabase Storage.');
+          return;
+        }
+        archivoUrl = path;
+        archivoNombre = fileToSave.name;
+        newInvoice.archivoUrl = archivoUrl;
+        newInvoice.archivoNombre = archivoNombre;
+      } catch (error) {
+        console.error('Error processing file:', error);
+        toast.showError('Error al procesar el archivo. Inténtalo de nuevo.');
         return;
       }
-      archivoUrl = path;
-      archivoNombre = fileToUpload.name;
-      newInvoice.archivoUrl = archivoUrl;
-      newInvoice.archivoNombre = archivoNombre;
     }
 
     try {
@@ -622,10 +745,11 @@ export default function App() {
         });
 
       if (error) throw error;
+      toast.showSuccess('Factura registrada exitosamente');
     } catch (error) {
       console.error('Error saving invoice:', error);
       setInvoices(prev => prev.filter(inv => inv.id !== newInvoice.id));
-      alert('Error al guardar la factura. Por favor, intenta de nuevo.');
+      toast.showError('Error al guardar la factura. Por favor, intenta de nuevo.');
       return;
     }
 
@@ -682,11 +806,12 @@ export default function App() {
         .eq('id', id);
 
       if (error) throw error;
+      toast.showSuccess('Factura eliminada correctamente');
     } catch (error) {
       console.error('Error deleting invoice:', error);
       // Rollback
       setInvoices(prev => [invoiceToDelete, ...prev].sort((a, b) => b.fecha.localeCompare(a.fecha)));
-      alert('Error al eliminar la factura.');
+      toast.showError('Error al eliminar la factura.');
     }
   };
 
@@ -712,12 +837,12 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-surface">
       {/* Sidebar */}
-      <aside className="w-60 bg-surface-container-low flex flex-col py-8 px-4 fixed h-full">
+      <aside className="w-60 bg-surface-container-low flex flex-col py-8 px-4 fixed h-full" role="navigation" aria-label="Menú principal">
         <div className="flex items-center gap-3 px-4 mb-12">
           {settings.logoUrl ? (
-            <img src={settings.logoUrl} alt="Logo" className="w-10 h-10 rounded-lg object-cover" />
+            <img src={settings.logoUrl} alt="Logo de la empresa" className="w-10 h-10 rounded-lg object-cover" />
           ) : (
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center" aria-hidden="true">
               <LayoutDashboard className="text-white w-6 h-6" />
             </div>
           )}
@@ -727,7 +852,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-2" role="menubar" aria-label="Navegación principal">
           {[
             { name: 'Panel Control', icon: LayoutDashboard },
             { name: 'Espacios', icon: Folder },
@@ -738,19 +863,21 @@ export default function App() {
             <button
               key={item.name}
               onClick={() => setActiveTab(item.name)}
+              role="menuitem"
+              aria-current={activeTab === item.name ? 'page' : undefined}
               className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 ${
                 activeTab === item.name
                   ? 'bg-surface-container-lowest text-primary shadow-sm border-r-4 border-primary'
                   : 'text-on-surface-variant hover:bg-surface-container-high/50 hover:text-on-surface'
               }`}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className="w-5 h-5" aria-hidden="true" />
               <span className="font-medium">{item.name}</span>
             </button>
           ))}
         </nav>
 
-        <button 
+        <button
           onClick={() => {
             setActiveTab('Facturas');
             setTimeout(() => {
@@ -759,8 +886,9 @@ export default function App() {
             }, 100);
           }}
           className="mt-auto flex items-center justify-center gap-2 btn-primary-gradient py-4 rounded-xl font-bold"
+          aria-label="Crear nueva factura"
         >
-          <Plus className="w-5 h-5" />
+          <Plus className="w-5 h-5" aria-hidden="true" />
           <span>Nueva Factura</span>
         </button>
       </aside>
@@ -768,43 +896,56 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 ml-60 flex flex-col">
         {/* Header */}
-        <header className="h-20 bg-surface-container-lowest flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm/5">
+        <header className="h-20 bg-surface-container-lowest flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm/5" role="banner">
           <div className="relative w-64">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" />
-            <input 
-              type="text" 
-              placeholder="Buscar facturas..." 
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" aria-hidden="true" />
+            <input
+              type="text"
+              placeholder="Buscar facturas... (presiona /)"
+              aria-label="Buscar facturas"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-surface-container-low border-none rounded-xl py-2.5 pl-11 pr-4 text-sm focus:ring-2 focus:ring-primary/20 transition-all"
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
+                aria-label="Limpiar búsqueda"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3" role="navigation" aria-label="Menú de usuario">
             <div className="flex items-center gap-0.5">
-              <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors">
-                <Bell className="w-5 h-5" />
+              <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors" aria-label="Notificaciones">
+                <Bell className="w-5 h-5" aria-hidden="true" />
               </button>
-              <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors">
-                <HelpCircle className="w-5 h-5" />
+              <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors" aria-label="Ayuda">
+                <HelpCircle className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
-            
-            <div className="h-8 w-[1px] bg-surface-container-high"></div>
+
+            <div className="h-8 w-[1px] bg-surface-container-high" role="separator" aria-hidden="true"></div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setActiveTab('Ajustes')}
                 className="flex items-center gap-2 hover:bg-surface-container-low p-1.5 rounded-2xl transition-all group"
+                aria-label={`Configuración de ${settings.companyName}`}
               >
                 <img
                   src={settings.userPhotoUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${settings.userName}`}
-                  alt="Perfil"
+                  alt={`Foto de perfil de ${settings.userName}`}
                   className="w-11 h-11 rounded-xl bg-surface-container-low object-cover border border-surface-container-high group-hover:border-primary transition-colors shadow-sm"
                   referrerPolicy="no-referrer"
                 />
                 <div className="text-left">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-bold text-on-surface leading-none">{settings.companyName}</p>
-                    <ChevronDown className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-primary transition-colors" />
+                    <ChevronDown className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-primary transition-colors" aria-hidden="true" />
                   </div>
                   <p className="text-[10px] uppercase tracking-wider text-primary font-bold mt-1.5 leading-none">{settings.userName}</p>
                   <p className="text-[9px] uppercase tracking-widest text-on-surface-variant font-medium mt-1 leading-none">{settings.userRole}</p>
@@ -817,8 +958,9 @@ export default function App() {
                 }}
                 className="p-2 text-on-surface-variant hover:bg-rose-50 hover:text-rose-600 rounded-xl transition-colors"
                 title="Cerrar sesión"
+                aria-label="Cerrar sesión"
               >
-                <LogOut className="w-5 h-5" />
+                <LogOut className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -1098,36 +1240,66 @@ export default function App() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Nº de Documento</label>
-                        <input 
+                        <input
                           ref={invoiceNumberRef}
-                          type="text" 
+                          type="text"
                           name="numeroFactura"
                           value={formData.numeroFactura}
                           onChange={handleInputChange}
-                          placeholder="ej. F-2024-001" 
-                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                          placeholder="ej. F-2024-001"
+                          aria-invalid={!!formErrors.numeroFactura}
+                          aria-describedby={formErrors.numeroFactura ? 'numeroFactura-error' : undefined}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
+                            formErrors.numeroFactura ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                          }`}
                         />
+                        {formErrors.numeroFactura && (
+                          <p id="numeroFactura-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {formErrors.numeroFactura}
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Fecha</label>
-                        <input 
-                          type="date" 
+                        <input
+                          type="date"
                           name="fecha"
                           value={formData.fecha}
                           onChange={handleInputChange}
-                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                          aria-invalid={!!formErrors.fecha}
+                          aria-describedby={formErrors.fecha ? 'fecha-error' : undefined}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
+                            formErrors.fecha ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                          }`}
                         />
+                        {formErrors.fecha && (
+                          <p id="fecha-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {formErrors.fecha}
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Proveedor</label>
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           name="proveedor"
                           value={formData.proveedor}
                           onChange={handleInputChange}
-                          placeholder="ej. Global Logistics Corp" 
-                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                          placeholder="ej. Global Logistics Corp"
+                          aria-invalid={!!formErrors.proveedor}
+                          aria-describedby={formErrors.proveedor ? 'proveedor-error' : undefined}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
+                            formErrors.proveedor ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                          }`}
                         />
+                        {formErrors.proveedor && (
+                          <p id="proveedor-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {formErrors.proveedor}
+                          </p>
+                        )}
                       </div>
                       <div className="col-span-2 space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Descripción / Nota</label>
@@ -1153,15 +1325,25 @@ export default function App() {
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Valor Neto</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">$</span>
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             name="valorNeto"
                             value={formData.valorNeto}
                             onChange={handleInputChange}
-                            placeholder="0.00" 
-                            className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 pl-8 pr-4 focus:ring-2 focus:ring-primary/20" 
+                            placeholder="0.00"
+                            aria-invalid={!!formErrors.valorNeto}
+                            aria-describedby={formErrors.valorNeto ? 'valorNeto-error' : undefined}
+                            className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 pl-8 pr-4 focus:ring-2 focus:ring-primary/20 ${
+                              formErrors.valorNeto ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                            }`}
                           />
                         </div>
+                        {formErrors.valorNeto && (
+                          <p id="valorNeto-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {formErrors.valorNeto}
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">IVA ({settings.ivaRate * 100}%)</label>
@@ -1225,10 +1407,11 @@ export default function App() {
                     </div>
 
                     <div className="flex justify-end mt-8">
-                      <button 
+                      <button
                         onClick={handleRegisterInvoice}
-                        disabled={!formData.proveedor || !formData.valorNeto || !formData.numeroFactura}
+                        disabled={!formData.proveedor || !formData.valorNeto || !formData.numeroFactura || Object.keys(formErrors).length > 0}
                         className="btn-primary-gradient px-10 py-4 rounded-xl font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Registrar factura"
                       >
                         Registrar Factura
                       </button>
@@ -1284,49 +1467,70 @@ export default function App() {
                       </thead>
                       <tbody className="divide-y divide-surface-container-low">
                         <AnimatePresence mode="popLayout">
-                          {invoices.length === 0 ? (
+                          {filteredInvoices.length === 0 ? (
                             <motion.tr key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                               <td colSpan={7} className="py-20 text-center text-on-surface-variant italic">
-                                No hay facturas registradas aún.
+                                {searchQuery ? (
+                                  <div>
+                                    <Search className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                                    <p className="font-bold text-lg">No se encontraron facturas</p>
+                                    <p className="text-sm mt-2">Intenta con otro término de búsqueda</p>
+                                  </div>
+                                ) : (
+                                  'No hay facturas registradas aún.'
+                                )}
                               </td>
                             </motion.tr>
                           ) : (
-                            invoices.map((invoice) => (
-                              <motion.tr 
-                                key={invoice.id}
-                                layout
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: 10 }}
-                                onClick={() => setDetailInvoice(invoice)}
-                                className="group hover:bg-surface-container-low/30 transition-colors cursor-pointer"
-                              >
-                                <td className="py-6 px-8 text-sm font-bold text-primary">
-                                  {invoice.numeroFactura}
-                                  {invoice.archivoUrl && <Paperclip className="inline-block ml-2 w-3.5 h-3.5 text-on-surface-variant" />}
-                                </td>
-                                <td className="py-6 px-8 text-sm font-medium text-on-surface">{invoice.fecha}</td>
-                                <td className="py-6 px-8">
-                                  <div className="flex items-center gap-3">
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold ${invoice.color}`}>
-                                      {invoice.initials}
+                            <>
+                              {filteredInvoices.slice(0, visibleInvoices).map((invoice) => (
+                                <motion.tr
+                                  key={invoice.id}
+                                  layout
+                                  initial={{ opacity: 0, x: -10 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  exit={{ opacity: 0, x: 10 }}
+                                  onClick={() => setDetailInvoice(invoice)}
+                                  className="group hover:bg-surface-container-low/30 transition-colors cursor-pointer"
+                                >
+                                  <td className="py-6 px-8 text-sm font-bold text-primary">
+                                    {invoice.numeroFactura}
+                                    {invoice.archivoUrl && <Paperclip className="inline-block ml-2 w-3.5 h-3.5 text-on-surface-variant" />}
+                                  </td>
+                                  <td className="py-6 px-8 text-sm font-medium text-on-surface">{invoice.fecha}</td>
+                                  <td className="py-6 px-8">
+                                    <div className="flex items-center gap-3">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold ${invoice.color}`}>
+                                        {invoice.initials}
+                                      </div>
+                                      <span className="text-sm font-bold text-on-surface">{invoice.proveedor}</span>
                                     </div>
-                                    <span className="text-sm font-bold text-on-surface">{invoice.proveedor}</span>
-                                  </div>
-                                </td>
-                                <td className="py-6 px-8 text-sm font-medium text-on-surface-variant text-right">${invoice.valorNeto.toLocaleString('es-CL')}</td>
-                                <td className="py-6 px-8 text-sm font-medium text-on-surface-variant text-right">${invoice.iva.toLocaleString('es-CL')}</td>
-                                <td className="py-6 px-8 text-sm font-extrabold text-primary text-right">${invoice.valorTotal.toLocaleString('es-CL')}</td>
-                                <td className="py-6 px-8 text-center">
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteInvoice(invoice.id); }}
-                                    className="p-2 text-on-surface-variant hover:bg-rose-50 hover:text-rose-600 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </td>
-                              </motion.tr>
-                            ))
+                                  </td>
+                                  <td className="py-6 px-8 text-sm font-medium text-on-surface-variant text-right">${invoice.valorNeto.toLocaleString('es-CL')}</td>
+                                  <td className="py-6 px-8 text-sm font-medium text-on-surface-variant text-right">${invoice.iva.toLocaleString('es-CL')}</td>
+                                  <td className="py-6 px-8 text-sm font-extrabold text-primary text-right">${invoice.valorTotal.toLocaleString('es-CL')}</td>
+                                  <td className="py-6 px-8 text-center">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteInvoice(invoice.id); }}
+                                      className="p-2 text-on-surface-variant hover:bg-rose-50 hover:text-rose-600 rounded-lg transition-colors"
+                                      aria-label={`Eliminar factura ${invoice.numeroFactura}`}
+                                    >
+                                      <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                    </button>
+                                  </td>
+                                </motion.tr>
+                              ))}
+                              {visibleInvoices < filteredInvoices.length && (
+                                <tr ref={invoicesSentinelRef}>
+                                  <td colSpan={7} className="py-8 text-center text-on-surface-variant">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                      <span>Cargando más facturas...</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
                           )}
                         </AnimatePresence>
                       </tbody>
@@ -1542,6 +1746,16 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Keyboard Shortcuts Modal */}
+          <AnimatePresence>
+            {showKeyboardShortcutsModal && (
+              <KeyboardShortcutsModal
+                isOpen={showKeyboardShortcutsModal}
+                onClose={() => setShowKeyboardShortcutsModal(false)}
+              />
             )}
           </AnimatePresence>
 

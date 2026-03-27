@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from './src/contexts/AuthContext';
 import { LayoutDashboard, Mail, Lock, UserPlus, LogIn, AlertCircle } from 'lucide-react';
 
 export default function AuthPage() {

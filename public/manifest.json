@@ -1,0 +1,20 @@
+{
+  "name": "Ledger - Inteligencia Financiera",
+  "short_name": "Ledger",
+  "description": "Gestiona tus gastos, facturas y presupuestos con análisis detallados",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9ff",
+  "theme_color": "#15157d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "lang": "es-CL"
+}
