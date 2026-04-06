@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   LayoutDashboard,
   FileText,
@@ -6,7 +6,7 @@ import {
   Settings,
   Search,
   Bell,
-  HelpCircle,
+
   Calendar,
   Plus,
   ChevronDown,
@@ -39,18 +39,22 @@ import {
   Download,
   FileDown,
   CheckCircle2,
-  Paperclip
+  Paperclip,
+  Clock,
+  Filter
 } from 'lucide-react';
 import EditSpaceModal from './components/EditSpaceModal';
 import InvoiceDetailModal from './components/InvoiceDetailModal';
-import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import SearchFilters from './components/SearchFilters';
+import RecentSearches from './components/RecentSearches';
 import { exportToCSV, exportToPDF } from './utils/export';
 import { processFileForUpload } from './utils/imageCompression';
+import { HighlightMatch } from './utils/highlightMatch';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './contexts/AuthContext';
 import { useToast } from './contexts/ToastContext';
 import { useLazyLoad } from './hooks/useLazyLoad';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useDebounce, useSearchFilters, useRecentSearches, SearchPreferences } from './hooks/useSearchFilters';
 import { supabase } from './lib/supabase';
 import {
   BarChart,
@@ -199,11 +203,10 @@ function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
               key={key}
               type="button"
               onClick={() => setIcono(key)}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${
-                icono === key
-                  ? 'bg-primary text-white shadow-lg scale-110'
-                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
-              }`}
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${icono === key
+                ? 'bg-primary text-white shadow-lg scale-110'
+                : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                }`}
             >
               <Icon className="w-5 h-5" />
             </button>
@@ -221,11 +224,10 @@ function CreateSpaceForm({ onSubmit, onCancel }: CreateSpaceFormProps) {
               key={spaceColor.name}
               type="button"
               onClick={() => setColor(spaceColor.name)}
-              className={`h-10 rounded-xl ${spaceColor.bg} transition-all ${
-                color === spaceColor.name
-                  ? 'ring-2 ring-primary ring-offset-2 scale-110'
-                  : 'hover:scale-105'
-              }`}
+              className={`h-10 rounded-xl ${spaceColor.bg} transition-all ${color === spaceColor.name
+                ? 'ring-2 ring-primary ring-offset-2 scale-110'
+                : 'hover:scale-105'
+                }`}
             />
           ))}
         </div>
@@ -335,56 +337,7 @@ export default function App() {
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('Panel Control');
   const invoiceNumberRef = React.useRef<HTMLInputElement>(null);
-  
-  // Keyboard shortcuts
-  useKeyboardShortcuts([
-    {
-      key: 'n',
-      ctrl: true,
-      callback: () => {
-        setActiveTab('Facturas');
-        setTimeout(() => {
-          invoiceNumberRef.current?.focus();
-        }, 100);
-      },
-    },
-    {
-      key: '1',
-      callback: () => setActiveTab('Panel Control'),
-    },
-    {
-      key: '2',
-      callback: () => setActiveTab('Espacios'),
-    },
-    {
-      key: '3',
-      callback: () => setActiveTab('Facturas'),
-    },
-    {
-      key: '4',
-      callback: () => setActiveTab('Análisis'),
-    },
-    {
-      key: '5',
-      callback: () => setActiveTab('Ajustes'),
-    },
-    {
-      key: '/',
-      callback: () => {
-        const searchInput = document.querySelector('input[placeholder="Buscar facturas..."]') as HTMLInputElement;
-        searchInput?.focus();
-      },
-    },
-    {
-      key: '?',
-      shift: true,
-      callback: () => setShowKeyboardShortcutsModal(true),
-    },
-    {
-      key: '?',
-      callback: () => setShowKeyboardShortcutsModal(true),
-    },
-  ]);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   // --- Settings State ---
   const [settings, setSettings] = useState(() => {
@@ -421,8 +374,16 @@ export default function App() {
   const [selectedSpace, setSelectedSpace] = useState<Space | null>(null);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
-  const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+
+  // Search state with debounce and filters
+  const { filters: searchFilters, updateFilter, clearFilters, hasActiveFilters } = useSearchFilters();
+  const { recentSearches, addSearch, removeSearch, clearSearches } = useRecentSearches(10);
+  const [showRecentSearches, setShowRecentSearches] = useState(false);
+  const [isHoveringRecent, setIsHoveringRecent] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+
+  // Debounced search query (300ms delay)
+  const debouncedSearchQuery = useDebounce(searchFilters.searchQuery, 300);
 
   // --- Date Filter State (for Analysis tab) ---
   const today = new Date().toISOString().split('T')[0];
@@ -450,17 +411,28 @@ export default function App() {
   const saveSpace = async (space: Space) => {
     if (!user) return;
     try {
+      console.log('Attempting to save space:', { space, userId: user.id });
       const { data, error } = await supabase
         .from('spaces')
-        .insert({ user_id: user.id, nombre: space.nombre, icono: space.icono, color: space.color, presupuesto: space.presupuesto ?? 0 })
+        .insert({ id: space.id, user_id: user.id, nombre: space.nombre, icono: space.icono, color: space.color, presupuesto: space.presupuesto ?? 0 })
         .select().single();
-      if (error) throw error;
-      setSpaces(prev => prev.map(s => s.id === space.id ? { ...data, presupuesto: Number(data.presupuesto ?? 0) } : s));
+
+      if (error) {
+        console.error('Supabase error details:', error);
+        throw error;
+      }
+
+      console.log('Space saved successfully:', data);
+      setSpaces(prev => {
+        const filtered = prev.filter(s => s.id !== space.id);
+        return [...filtered, { ...data, presupuesto: Number(data.presupuesto ?? 0) }];
+      });
       toast.showSuccess('Espacio creado exitosamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving space:', error);
+      const errorMessage = error?.message || 'Error desconocido';
       setSpaces(prev => prev.filter(s => s.id !== space.id));
-      toast.showError('Error al guardar el espacio. Por favor, intenta de nuevo.');
+      toast.showError(`Error al guardar el espacio: ${errorMessage}`);
     }
   };
 
@@ -527,7 +499,7 @@ export default function App() {
             valorNeto: Number(inv.valor_neto),
             iva: Number(inv.iva),
             valorTotal: Number(inv.valor_total),
-            initials: inv.proveedor.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2),
+            initials: inv.proveedor ? inv.proveedor.split(' ').filter(Boolean).map((w: string) => w[0]).join('').toUpperCase().slice(0, 2) : '??',
             color: INVOICE_COLORS[Math.floor(inv.id.charCodeAt(0) % INVOICE_COLORS.length)],
             spaceId: inv.space_id,
             descripcion: inv.descripcion || '',
@@ -556,29 +528,40 @@ export default function App() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // --- Form Validation ---
+  const isFormValid = (): boolean => {
+    return (
+      formData.numeroFactura.trim().length >= 3 &&
+      formData.proveedor.trim().length >= 3 &&
+      formData.valorNeto !== '' &&
+      !isNaN(parseFloat(formData.valorNeto)) &&
+      parseFloat(formData.valorNeto) > 0 &&
+      formData.fecha !== ''
+    );
+  };
+
   const validateForm = () => {
     const errors: Record<string, string> = {};
-    
+
     if (!formData.numeroFactura.trim()) {
       errors.numeroFactura = 'El número de documento es requerido';
     } else if (formData.numeroFactura.trim().length < 3) {
       errors.numeroFactura = 'Mínimo 3 caracteres';
     }
-    
+
     if (!formData.proveedor.trim()) {
       errors.proveedor = 'El proveedor es requerido';
     } else if (formData.proveedor.trim().length < 3) {
       errors.proveedor = 'Mínimo 3 caracteres';
     }
-    
+
     if (!formData.valorNeto || isNaN(parseFloat(formData.valorNeto)) || parseFloat(formData.valorNeto) <= 0) {
       errors.valorNeto = 'Ingrese un valor neto válido mayor a 0';
     }
-    
+
     if (!formData.fecha) {
       errors.fecha = 'La fecha es requerida';
     }
-    
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -599,23 +582,56 @@ export default function App() {
   // --- Analysis Data ---
   const filteredInvoices = useMemo(() => {
     let result = invoices.filter(inv => {
+      // Date filter
       if (dateFrom && inv.fecha < dateFrom) return false;
       if (dateTo && inv.fecha > dateTo) return false;
+
+      // Search query filter (debounced)
+      if (debouncedSearchQuery.trim()) {
+        const query = debouncedSearchQuery.toLowerCase();
+        const matchesSearch =
+          inv.numeroFactura.toLowerCase().includes(query) ||
+          inv.proveedor.toLowerCase().includes(query) ||
+          inv.descripcion?.toLowerCase().includes(query) ||
+          inv.tipoDocumento?.toLowerCase().includes(query);
+        if (!matchesSearch) return false;
+      }
+
+      // Tipo de documento filter
+      if (searchFilters.tipoDocumento !== 'todos' && inv.tipoDocumento !== searchFilters.tipoDocumento) {
+        return false;
+      }
+
+      // Proveedor filter
+      if (searchFilters.proveedor && !inv.proveedor.toLowerCase().includes(searchFilters.proveedor.toLowerCase())) {
+        return false;
+      }
+
+      // Space filter
+      if (searchFilters.spaceId && inv.spaceId !== searchFilters.spaceId) {
+        return false;
+      }
+
+      // Valor mínimo filter
+      if (searchFilters.valorMinimo !== undefined && inv.valorTotal < searchFilters.valorMinimo) {
+        return false;
+      }
+
+      // Valor máximo filter
+      if (searchFilters.valorMaximo !== undefined && inv.valorTotal > searchFilters.valorMaximo) {
+        return false;
+      }
+
+      // Con archivo filter
+      if (searchFilters.conArchivo && !inv.archivoUrl) {
+        return false;
+      }
+
       return true;
     });
-    
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(inv => 
-        inv.numeroFactura.toLowerCase().includes(query) ||
-        inv.proveedor.toLowerCase().includes(query) ||
-        inv.descripcion?.toLowerCase().includes(query)
-      );
-    }
-    
+
     return result;
-  }, [invoices, dateFrom, dateTo, searchQuery]);
+  }, [invoices, dateFrom, dateTo, debouncedSearchQuery, searchFilters]);
 
   // Lazy loading for invoices table
   const { visibleItems: visibleInvoices, sentinelRef: invoicesSentinelRef } = useLazyLoad(filteredInvoices.length, { initialVisible: 50 });
@@ -656,7 +672,7 @@ export default function App() {
       toast.showError('Por favor corrija los errores en el formulario');
       return;
     }
-    
+
     if (!user) {
       return;
     }
@@ -698,13 +714,13 @@ export default function App() {
         toast.showError('El archivo no puede superar 5 MB.');
         return;
       }
-      
+
       try {
         // Compress image files before upload
         const fileToSave = fileToUpload.type.startsWith('image/')
           ? await processFileForUpload(fileToUpload, 2)
           : fileToUpload;
-        
+
         const path = `${user.id}/${newInvoice.id}-${fileToSave.name}`;
         const { error: uploadError } = await supabase.storage.from('receipts').upload(path, fileToSave);
         if (uploadError) {
@@ -723,6 +739,8 @@ export default function App() {
     }
 
     try {
+      console.log('Attempting to save invoice:', { newInvoice, userId: user.id });
+
       // Optimistic update
       setInvoices(prev => [newInvoice, ...prev]);
 
@@ -744,12 +762,18 @@ export default function App() {
           archivo_nombre: archivoNombre || null,
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error details:', error);
+        throw error;
+      }
+
+      console.log('Invoice saved successfully');
       toast.showSuccess('Factura registrada exitosamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving invoice:', error);
+      const errorMessage = error?.message || 'Error desconocido';
       setInvoices(prev => prev.filter(inv => inv.id !== newInvoice.id));
-      toast.showError('Error al guardar la factura. Por favor, intenta de nuevo.');
+      toast.showError(`Error al guardar la factura: ${errorMessage}`);
       return;
     }
 
@@ -792,7 +816,7 @@ export default function App() {
 
   const handleDeleteInvoice = async (id: string) => {
     if (!user) return;
-    
+
     const invoiceToDelete = invoices.find(inv => inv.id === id);
     if (!invoiceToDelete) return;
 
@@ -865,11 +889,10 @@ export default function App() {
               onClick={() => setActiveTab(item.name)}
               role="menuitem"
               aria-current={activeTab === item.name ? 'page' : undefined}
-              className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 ${
-                activeTab === item.name
-                  ? 'bg-surface-container-lowest text-primary shadow-sm border-r-4 border-primary'
-                  : 'text-on-surface-variant hover:bg-surface-container-high/50 hover:text-on-surface'
-              }`}
+              className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-300 ${activeTab === item.name
+                ? 'bg-surface-container-lowest text-primary shadow-sm border-r-4 border-primary'
+                : 'text-on-surface-variant hover:bg-surface-container-high/50 hover:text-on-surface'
+                }`}
             >
               <item.icon className="w-5 h-5" aria-hidden="true" />
               <span className="font-medium">{item.name}</span>
@@ -897,34 +920,97 @@ export default function App() {
       <main className="flex-1 ml-60 flex flex-col">
         {/* Header */}
         <header className="h-20 bg-surface-container-lowest flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm/5" role="banner">
-          <div className="relative w-64">
+          <div className="relative w-96">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Buscar facturas... (presiona /)"
               aria-label="Buscar facturas"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 pl-11 pr-4 text-sm focus:ring-2 focus:ring-primary/20 transition-all"
+              value={searchFilters.searchQuery}
+              onChange={(e) => {
+                updateFilter('searchQuery', e.target.value);
+                setShowRecentSearches(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (searchFilters.searchQuery.trim()) {
+                    addSearch(searchFilters.searchQuery, {
+                      tipoDocumento: searchFilters.tipoDocumento,
+                      valorMinimo: searchFilters.valorMinimo,
+                      valorMaximo: searchFilters.valorMaximo,
+                      proveedor: searchFilters.proveedor,
+                      conArchivo: searchFilters.conArchivo,
+                      spaceId: searchFilters.spaceId,
+                    });
+                  }
+                  setShowRecentSearches(false);
+                }
+              }}
+              onFocus={() => setShowRecentSearches(true)}
+              onBlur={() => {
+                // Only close if not hovering over the recent searches dropdown
+                setTimeout(() => {
+                  if (!isHoveringRecent) {
+                    setShowRecentSearches(false);
+                  }
+                }, 150);
+              }}
+              className="w-full bg-surface-container-low border-none rounded-xl py-2.5 pl-11 pr-10 text-sm focus:ring-2 focus:ring-primary/20 transition-all"
             />
-            {searchQuery && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {searchFilters.searchQuery && (
+                <button
+                  onClick={() => updateFilter('searchQuery', '')}
+                  className="p-1 hover:bg-surface-container-high rounded-lg text-on-surface-variant transition-colors"
+                  aria-label="Limpiar búsqueda"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
-                aria-label="Limpiar búsqueda"
+                onClick={() => setShowFiltersPanel(!showFiltersPanel)}
+                className={`p-1 rounded-lg transition-colors ${hasActiveFilters ? 'bg-primary/10 text-primary' : 'hover:bg-surface-container-high text-on-surface-variant'
+                  }`}
+                aria-label="Filtros de búsqueda"
+                title="Filtros avanzados"
               >
-                <X className="w-4 h-4" />
+                <Filter className="w-3.5 h-3.5" />
               </button>
-            )}
+            </div>
+
+            {/* Recent Searches Dropdown */}
+            <AnimatePresence>
+              {showRecentSearches && recentSearches.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  onMouseEnter={() => setIsHoveringRecent(true)}
+                  onMouseLeave={() => setIsHoveringRecent(false)}
+                >
+                  <RecentSearches
+                    recentSearches={recentSearches}
+                    onRemoveSearch={removeSearch}
+                    onClearAll={clearSearches}
+                    onSelectSearch={(search) => {
+                      updateFilter('searchQuery', search.query);
+                      if (search.filters.tipoDocumento) updateFilter('tipoDocumento', search.filters.tipoDocumento);
+                      if (search.filters.conArchivo) updateFilter('conArchivo', search.filters.conArchivo);
+                      setShowRecentSearches(false);
+                      setIsHoveringRecent(false);
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="flex items-center gap-3" role="navigation" aria-label="Menú de usuario">
             <div className="flex items-center gap-0.5">
               <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors" aria-label="Notificaciones">
                 <Bell className="w-5 h-5" aria-hidden="true" />
-              </button>
-              <button className="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors" aria-label="Ayuda">
-                <HelpCircle className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -1020,8 +1106,8 @@ export default function App() {
                         <LineChart data={chartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(value) => `$${value/1000}k`} />
-                          <Tooltip 
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(value) => `$${value / 1000}k`} />
+                          <Tooltip
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                             formatter={(value: number) => [`$${value.toLocaleString('es-CL')}`, 'Total']}
                           />
@@ -1057,128 +1143,128 @@ export default function App() {
               </motion.div>
             )}
 
-              {activeTab === 'Espacios' && (() => {
-                // Compute budget alerts
-                const budgetAlerts = spaces.filter(s => {
-                  if (!s.presupuesto || s.presupuesto <= 0) return false;
-                  const gastado = invoices.filter(i => i.spaceId === s.id).reduce((sum, i) => sum + i.valorTotal, 0);
-                  return (gastado / s.presupuesto) * 100 >= alertThreshold;
-                });
-                return (
-                  <motion.div
-                    key="spaces"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    className="space-y-10"
-                  >
-                    <div className="flex items-end justify-between">
-                      <div>
-                        <h2 className="text-4xl font-extrabold text-primary tracking-tight">Espacios de Gastos</h2>
-                        <p className="text-on-surface-variant mt-2 text-lg">Organiza tus gastos por categorías personalizadas.</p>
-                      </div>
-                      <button
-                        onClick={() => setShowCreateSpaceModal(true)}
-                        className="flex items-center gap-2 btn-primary-gradient px-6 py-3 rounded-xl font-bold"
-                      >
-                        <Plus className="w-5 h-5" />
-                        <span>Nuevo Espacio</span>
-                      </button>
+            {activeTab === 'Espacios' && (() => {
+              // Compute budget alerts
+              const budgetAlerts = spaces.filter(s => {
+                if (!s.presupuesto || s.presupuesto <= 0) return false;
+                const gastado = invoices.filter(i => i.spaceId === s.id).reduce((sum, i) => sum + i.valorTotal, 0);
+                return (gastado / s.presupuesto) * 100 >= alertThreshold;
+              });
+              return (
+                <motion.div
+                  key="spaces"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-10"
+                >
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <h2 className="text-4xl font-extrabold text-primary tracking-tight">Espacios de Gastos</h2>
+                      <p className="text-on-surface-variant mt-2 text-lg">Organiza tus gastos por categorías personalizadas.</p>
                     </div>
+                    <button
+                      onClick={() => setShowCreateSpaceModal(true)}
+                      className="flex items-center gap-2 btn-primary-gradient px-6 py-3 rounded-xl font-bold"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span>Nuevo Espacio</span>
+                    </button>
+                  </div>
 
-                    {/* Alert Banner */}
-                    {budgetAlerts.length > 0 && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-bold text-amber-800 text-sm">Alertas de Presupuesto</p>
-                          <p className="text-amber-700 text-sm">
-                            {budgetAlerts.map(s => s.nombre).join(', ')} {budgetAlerts.length === 1 ? 'ha' : 'han'} alcanzado el {alertThreshold}% del presupuesto.
-                          </p>
-                        </div>
+                  {/* Alert Banner */}
+                  {budgetAlerts.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-bold text-amber-800 text-sm">Alertas de Presupuesto</p>
+                        <p className="text-amber-700 text-sm">
+                          {budgetAlerts.map(s => s.nombre).join(', ')} {budgetAlerts.length === 1 ? 'ha' : 'han'} alcanzado el {alertThreshold}% del presupuesto.
+                        </p>
                       </div>
-                    )}
+                    </div>
+                  )}
 
-                    <div className="grid grid-cols-12 gap-6">
-                      <div className="col-span-12">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {spaces.map((space) => {
-                            const IconComponent = SPACE_ICONS[space.icono] || Folder;
-                            const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
-                            const spaceInvoices = invoices.filter(inv => inv.spaceId === space.id);
-                            const totalGastado = spaceInvoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
-                            const presupuesto = space.presupuesto ?? 0;
-                            const pct = presupuesto > 0 ? Math.min((totalGastado / presupuesto) * 100, 100) : 0;
-                            const barColor = pct >= 100 ? 'bg-red-500' : pct >= alertThreshold ? 'bg-amber-400' : 'bg-emerald-500';
+                  <div className="grid grid-cols-12 gap-6">
+                    <div className="col-span-12">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {spaces.map((space) => {
+                          const IconComponent = SPACE_ICONS[space.icono] || Folder;
+                          const spaceColor = SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0];
+                          const spaceInvoices = invoices.filter(inv => inv.spaceId === space.id);
+                          const totalGastado = spaceInvoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
+                          const presupuesto = space.presupuesto ?? 0;
+                          const pct = presupuesto > 0 ? Math.min((totalGastado / presupuesto) * 100, 100) : 0;
+                          const barColor = pct >= 100 ? 'bg-red-500' : pct >= alertThreshold ? 'bg-amber-400' : 'bg-emerald-500';
 
-                            return (
-                              <motion.div
-                                key={space.id}
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={() => setSelectedSpace(space)}
-                                className={`${spaceColor.bg} ${spaceColor.text} rounded-[2rem] p-6 cursor-pointer border-2 ${spaceColor.border} transition-all hover:shadow-lg`}
-                              >
-                                <div className="flex items-start justify-between mb-4">
-                                  <div className={`w-14 h-14 ${spaceColor.bg} rounded-2xl flex items-center justify-center`}>
-                                    <IconComponent className="w-7 h-7" />
+                          return (
+                            <motion.div
+                              key={space.id}
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => setSelectedSpace(space)}
+                              className={`${spaceColor.bg} ${spaceColor.text} rounded-[2rem] p-6 cursor-pointer border-2 ${spaceColor.border} transition-all hover:shadow-lg`}
+                            >
+                              <div className="flex items-start justify-between mb-4">
+                                <div className={`w-14 h-14 ${spaceColor.bg} rounded-2xl flex items-center justify-center`}>
+                                  <IconComponent className="w-7 h-7" />
+                                </div>
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setEditingSpace(space); }}
+                                    className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                                    title="Editar espacio"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); deleteSpace(space.id); }}
+                                    className="p-2 hover:bg-black/10 rounded-xl transition-colors"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                              <h3 className="text-xl font-bold mb-1">{space.nombre}</h3>
+                              <p className="text-sm opacity-70 mb-2">{spaceInvoices.length} facturas</p>
+                              <p className="text-2xl font-extrabold mb-3">${totalGastado.toLocaleString('es-CL')}</p>
+                              {presupuesto > 0 && (
+                                <div>
+                                  <div className="flex justify-between text-xs font-semibold mb-1 opacity-80">
+                                    <span>Presupuesto: ${presupuesto.toLocaleString('es-CL')}</span>
+                                    <span>{Math.round((totalGastado / presupuesto) * 100)}%</span>
                                   </div>
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setEditingSpace(space); }}
-                                      className="p-2 hover:bg-black/10 rounded-xl transition-colors"
-                                      title="Editar espacio"
-                                    >
-                                      <Pencil className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); deleteSpace(space.id); }}
-                                      className="p-2 hover:bg-black/10 rounded-xl transition-colors"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                  <div className="h-2 bg-black/10 rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${pct}%` }}
+                                      transition={{ duration: 0.6 }}
+                                      className={`h-full rounded-full ${barColor}`}
+                                    />
                                   </div>
                                 </div>
-                                <h3 className="text-xl font-bold mb-1">{space.nombre}</h3>
-                                <p className="text-sm opacity-70 mb-2">{spaceInvoices.length} facturas</p>
-                                <p className="text-2xl font-extrabold mb-3">${totalGastado.toLocaleString('es-CL')}</p>
-                                {presupuesto > 0 && (
-                                  <div>
-                                    <div className="flex justify-between text-xs font-semibold mb-1 opacity-80">
-                                      <span>Presupuesto: ${presupuesto.toLocaleString('es-CL')}</span>
-                                      <span>{Math.round((totalGastado / presupuesto) * 100)}%</span>
-                                    </div>
-                                    <div className="h-2 bg-black/10 rounded-full overflow-hidden">
-                                      <motion.div
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${pct}%` }}
-                                        transition={{ duration: 0.6 }}
-                                        className={`h-full rounded-full ${barColor}`}
-                                      />
-                                    </div>
-                                  </div>
-                                )}
-                              </motion.div>
-                            );
-                          })}
+                              )}
+                            </motion.div>
+                          );
+                        })}
 
-                          {/* Empty State */}
-                          {spaces.length === 0 && (
-                            <div className="col-span-full bg-surface-container-low rounded-[2rem] p-12 text-center">
-                              <Folder className="w-16 h-16 text-on-surface-variant mx-auto mb-4 opacity-30" />
-                              <h3 className="text-xl font-bold text-on-surface mb-2">Sin espacios</h3>
-                              <p className="text-on-surface-variant mb-6">Crea tu primer espacio para organizar tus gastos</p>
-                              <button onClick={() => setShowCreateSpaceModal(true)} className="btn-primary-gradient px-6 py-3 rounded-xl font-bold">
-                                Crear primer espacio
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        {/* Empty State */}
+                        {spaces.length === 0 && (
+                          <div className="col-span-full bg-surface-container-low rounded-[2rem] p-12 text-center">
+                            <Folder className="w-16 h-16 text-on-surface-variant mx-auto mb-4 opacity-30" />
+                            <h3 className="text-xl font-bold text-on-surface mb-2">Sin espacios</h3>
+                            <p className="text-on-surface-variant mb-6">Crea tu primer espacio para organizar tus gastos</p>
+                            <button onClick={() => setShowCreateSpaceModal(true)} className="btn-primary-gradient px-6 py-3 rounded-xl font-bold">
+                              Crear primer espacio
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </motion.div>
-                );
-              })()}
+                  </div>
+                </motion.div>
+              );
+            })()}
 
 
             {activeTab === 'Facturas' && (
@@ -1249,9 +1335,8 @@ export default function App() {
                           placeholder="ej. F-2024-001"
                           aria-invalid={!!formErrors.numeroFactura}
                           aria-describedby={formErrors.numeroFactura ? 'numeroFactura-error' : undefined}
-                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
-                            formErrors.numeroFactura ? 'ring-2 ring-rose-500 bg-rose-50' : ''
-                          }`}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${formErrors.numeroFactura ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                            }`}
                         />
                         {formErrors.numeroFactura && (
                           <p id="numeroFactura-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
@@ -1269,9 +1354,8 @@ export default function App() {
                           onChange={handleInputChange}
                           aria-invalid={!!formErrors.fecha}
                           aria-describedby={formErrors.fecha ? 'fecha-error' : undefined}
-                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
-                            formErrors.fecha ? 'ring-2 ring-rose-500 bg-rose-50' : ''
-                          }`}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${formErrors.fecha ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                            }`}
                         />
                         {formErrors.fecha && (
                           <p id="fecha-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
@@ -1290,9 +1374,8 @@ export default function App() {
                           placeholder="ej. Global Logistics Corp"
                           aria-invalid={!!formErrors.proveedor}
                           aria-describedby={formErrors.proveedor ? 'proveedor-error' : undefined}
-                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${
-                            formErrors.proveedor ? 'ring-2 ring-rose-500 bg-rose-50' : ''
-                          }`}
+                          className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${formErrors.proveedor ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                            }`}
                         />
                         {formErrors.proveedor && (
                           <p id="proveedor-error" className="text-xs text-rose-600 font-medium flex items-center gap-1">
@@ -1303,22 +1386,22 @@ export default function App() {
                       </div>
                       <div className="col-span-2 space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Descripción / Nota</label>
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           name="descripcion"
                           value={formData.descripcion}
                           onChange={handleInputChange}
-                          placeholder="ej. Compra de materiales de oficina..." 
-                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20" 
+                          placeholder="ej. Compra de materiales de oficina..."
+                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
                         />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Archivo Adjunto (Opcional)</label>
-                        <input 
-                          type="file" 
+                        <input
+                          type="file"
                           accept=".pdf,image/jpeg,image/png,image/webp"
                           onChange={(e) => setFileToUpload(e.target.files?.[0] || null)}
-                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/90 cursor-pointer" 
+                          className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/90 cursor-pointer"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1333,9 +1416,8 @@ export default function App() {
                             placeholder="0.00"
                             aria-invalid={!!formErrors.valorNeto}
                             aria-describedby={formErrors.valorNeto ? 'valorNeto-error' : undefined}
-                            className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 pl-8 pr-4 focus:ring-2 focus:ring-primary/20 ${
-                              formErrors.valorNeto ? 'ring-2 ring-rose-500 bg-rose-50' : ''
-                            }`}
+                            className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 pl-8 pr-4 focus:ring-2 focus:ring-primary/20 ${formErrors.valorNeto ? 'ring-2 ring-rose-500 bg-rose-50' : ''
+                              }`}
                           />
                         </div>
                         {formErrors.valorNeto && (
@@ -1349,11 +1431,11 @@ export default function App() {
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">IVA ({settings.ivaRate * 100}%)</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">$</span>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             readOnly
                             value={calculatedIva.toLocaleString('es-CL')}
-                            className="w-full bg-surface-container-high/30 border-none rounded-xl py-3 pl-8 pr-4 text-on-surface-variant cursor-not-allowed" 
+                            className="w-full bg-surface-container-high/30 border-none rounded-xl py-3 pl-8 pr-4 text-on-surface-variant cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -1375,11 +1457,10 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => setSelectedSpaceId(null)}
-                            className={`py-3 px-4 rounded-xl font-medium transition-all ${
-                              selectedSpaceId === null
-                                ? 'bg-primary text-white shadow-md'
-                                : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
-                            }`}
+                            className={`py-3 px-4 rounded-xl font-medium transition-all ${selectedSpaceId === null
+                              ? 'bg-primary text-white shadow-md'
+                              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                              }`}
                           >
                             Sin espacio
                           </button>
@@ -1391,11 +1472,10 @@ export default function App() {
                                 key={space.id}
                                 type="button"
                                 onClick={() => setSelectedSpaceId(space.id)}
-                                className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center gap-2 ${
-                                  selectedSpaceId === space.id
-                                    ? `${spaceColor.bg} ${spaceColor.text} ring-2 ring-primary shadow-md`
-                                    : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
-                                }`}
+                                className={`py-3 px-4 rounded-xl font-medium transition-all flex items-center gap-2 ${selectedSpaceId === space.id
+                                  ? `${spaceColor.bg} ${spaceColor.text} ring-2 ring-primary shadow-md`
+                                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                                  }`}
                               >
                                 <IconComponent className="w-4 h-4" />
                                 <span className="truncate">{space.nombre}</span>
@@ -1409,7 +1489,7 @@ export default function App() {
                     <div className="flex justify-end mt-8">
                       <button
                         onClick={handleRegisterInvoice}
-                        disabled={!formData.proveedor || !formData.valorNeto || !formData.numeroFactura || Object.keys(formErrors).length > 0}
+                        disabled={!isFormValid()}
                         className="btn-primary-gradient px-10 py-4 rounded-xl font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         aria-label="Registrar factura"
                       >
@@ -1434,7 +1514,7 @@ export default function App() {
                         <p className="text-2xl font-extrabold text-on-surface">{activeInvoicesCount}</p>
                       </div>
                       <div className="h-2 w-full bg-surface-container-low rounded-full overflow-hidden">
-                        <motion.div 
+                        <motion.div
                           initial={{ width: 0 }}
                           animate={{ width: activeInvoicesCount > 0 ? '100%' : '0%' }}
                           className="h-full bg-secondary"
@@ -1451,6 +1531,17 @@ export default function App() {
                       <h3 className="text-2xl font-extrabold text-on-surface">Registro de Facturas</h3>
                     </div>
                   </div>
+
+                  {/* Search Filters Panel */}
+                  {showFiltersPanel && (
+                    <SearchFilters
+                      filters={searchFilters}
+                      onUpdateFilter={updateFilter}
+                      onClearFilters={clearFilters}
+                      spaces={spaces}
+                      resultCount={filteredInvoices.length}
+                    />
+                  )}
 
                   <div className="bg-surface-container-lowest rounded-[2rem] overflow-hidden shadow-sm border border-surface-container-low">
                     <table className="w-full text-left border-collapse">
@@ -1470,7 +1561,19 @@ export default function App() {
                           {filteredInvoices.length === 0 ? (
                             <motion.tr key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                               <td colSpan={7} className="py-20 text-center text-on-surface-variant italic">
-                                {searchQuery ? (
+                                {hasActiveFilters ? (
+                                  <div>
+                                    <Filter className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                                    <p className="font-bold text-lg">No se encontraron facturas</p>
+                                    <p className="text-sm mt-2">Intenta con otros filtros o términos de búsqueda</p>
+                                    <button
+                                      onClick={clearFilters}
+                                      className="mt-4 px-6 py-2 bg-primary text-white rounded-xl font-bold text-sm hover:bg-primary/90 transition-colors"
+                                    >
+                                      Limpiar filtros
+                                    </button>
+                                  </div>
+                                ) : searchFilters.searchQuery ? (
                                   <div>
                                     <Search className="w-12 h-12 mx-auto mb-4 opacity-30" />
                                     <p className="font-bold text-lg">No se encontraron facturas</p>
@@ -1494,7 +1597,11 @@ export default function App() {
                                   className="group hover:bg-surface-container-low/30 transition-colors cursor-pointer"
                                 >
                                   <td className="py-6 px-8 text-sm font-bold text-primary">
-                                    {invoice.numeroFactura}
+                                    <HighlightMatch
+                                      text={invoice.numeroFactura}
+                                      query={searchFilters.searchQuery}
+                                      highlightClassName="bg-yellow-200 text-on-surface font-bold px-0.5 rounded"
+                                    />
                                     {invoice.archivoUrl && <Paperclip className="inline-block ml-2 w-3.5 h-3.5 text-on-surface-variant" />}
                                   </td>
                                   <td className="py-6 px-8 text-sm font-medium text-on-surface">{invoice.fecha}</td>
@@ -1503,7 +1610,11 @@ export default function App() {
                                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold ${invoice.color}`}>
                                         {invoice.initials}
                                       </div>
-                                      <span className="text-sm font-bold text-on-surface">{invoice.proveedor}</span>
+                                      <HighlightMatch
+                                        text={invoice.proveedor}
+                                        query={searchFilters.searchQuery}
+                                        highlightClassName="bg-yellow-200 text-on-surface font-bold px-0.5 rounded"
+                                      />
                                     </div>
                                   </td>
                                   <td className="py-6 px-8 text-sm font-medium text-on-surface-variant text-right">${invoice.valorNeto.toLocaleString('es-CL')}</td>
@@ -1591,8 +1702,8 @@ export default function App() {
                         <BarChart data={chartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                          <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `$${value/1000}k`} />
-                          <Tooltip 
+                          <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `$${value / 1000}k`} />
+                          <Tooltip
                             cursor={{ fill: '#f8fafc' }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                           />
@@ -1637,8 +1748,8 @@ export default function App() {
                                 <Upload className="w-8 h-8 text-on-surface-variant" />
                               )}
                             </div>
-                            <input 
-                              type="file" 
+                            <input
+                              type="file"
                               accept="image/*"
                               onChange={handleLogoUpload}
                               className="absolute inset-0 opacity-0 cursor-pointer"
@@ -1652,8 +1763,8 @@ export default function App() {
 
                         <div className="space-y-2">
                           <label className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">Nombre de la Empresa</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={tempSettings.companyName}
                             onChange={(e) => setTempSettings({ ...tempSettings, companyName: e.target.value })}
                             className="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
@@ -1661,8 +1772,8 @@ export default function App() {
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">Tu Cargo / Rol</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={tempSettings.userRole}
                             onChange={(e) => setTempSettings({ ...tempSettings, userRole: e.target.value })}
                             className="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
@@ -1680,8 +1791,8 @@ export default function App() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">Tasa de IVA (ej. 0.19 para 19%)</label>
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           step="0.01"
                           value={tempSettings.ivaRate}
                           onChange={(e) => setTempSettings({ ...tempSettings, ivaRate: parseFloat(e.target.value) || 0 })}
@@ -1710,8 +1821,8 @@ export default function App() {
                                 <Upload className="w-5 h-5 text-white" />
                               </div>
                             </div>
-                            <input 
-                              type="file" 
+                            <input
+                              type="file"
                               accept="image/*"
                               onChange={handleUserPhotoUpload}
                               className="absolute inset-0 opacity-0 cursor-pointer"
@@ -1725,8 +1836,8 @@ export default function App() {
 
                         <div className="space-y-2">
                           <label className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">Nombre de Usuario (para Avatar)</label>
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             value={tempSettings.userName}
                             onChange={(e) => setTempSettings({ ...tempSettings, userName: e.target.value })}
                             className="w-full bg-surface-container-low border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
@@ -1736,7 +1847,7 @@ export default function App() {
                     </div>
 
                     <div className="pt-6">
-                      <button 
+                      <button
                         onClick={handleSaveSettings}
                         className="w-full btn-primary-gradient py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/20"
                       >
@@ -1746,16 +1857,6 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Keyboard Shortcuts Modal */}
-          <AnimatePresence>
-            {showKeyboardShortcutsModal && (
-              <KeyboardShortcutsModal
-                isOpen={showKeyboardShortcutsModal}
-                onClose={() => setShowKeyboardShortcutsModal(false)}
-              />
             )}
           </AnimatePresence>
 

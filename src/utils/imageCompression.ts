@@ -101,7 +101,6 @@ export async function processFileForUpload(
     }
     
     // Create new file with webp extension
-    const extension = file.name.split('.').pop() || 'webp';
     const baseName = file.name.replace(/\.[^/.]+$/, '');
     return new File([finalBlob], `${baseName}.webp`, {
       type: 'image/webp',

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd *)",
+      "Bash(select-object *)",
+      "Bash(npx *)",
+      "Bash(type *)"
+    ]
+  },
+  "$version": 3
+}
