@@ -582,7 +582,7 @@ export default function App() {
   // --- Analysis Data ---
   const filteredInvoices = useMemo(() => {
     let result = invoices.filter(inv => {
-      // Date filter
+      // Date filter (dateFrom/dateTo range)
       if (dateFrom && inv.fecha < dateFrom) return false;
       if (dateTo && inv.fecha > dateTo) return false;
 
@@ -597,7 +597,7 @@ export default function App() {
         if (!matchesSearch) return false;
       }
 
-      // Tipo de documento filter
+      // Tipo de documento filter (Factura/Boleta)
       if (searchFilters.tipoDocumento !== 'todos' && inv.tipoDocumento !== searchFilters.tipoDocumento) {
         return false;
       }
@@ -607,9 +607,35 @@ export default function App() {
         return false;
       }
 
-      // Space filter
+      // Espacio filter
       if (searchFilters.spaceId && inv.spaceId !== searchFilters.spaceId) {
         return false;
+      }
+
+      // Número de factura filter
+      if (searchFilters.numeroFactura && !inv.numeroFactura.toLowerCase().includes(searchFilters.numeroFactura.toLowerCase())) {
+        return false;
+      }
+
+      // Fecha Año filter
+      if (searchFilters.fechaAnio && !inv.fecha.startsWith(searchFilters.fechaAnio)) {
+        return false;
+      }
+
+      // Fecha Mes filter
+      if (searchFilters.fechaMes) {
+        const invMonth = inv.fecha.slice(5, 7); // Extract MM from YYYY-MM-DD
+        if (invMonth !== searchFilters.fechaMes) {
+          return false;
+        }
+      }
+
+      // Fecha Día filter
+      if (searchFilters.fechaDia) {
+        const invDay = inv.fecha.slice(8, 10); // Extract DD from YYYY-MM-DD
+        if (invDay !== searchFilters.fechaDia) {
+          return false;
+        }
       }
 
       // Valor mínimo filter

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Filter, DollarSign, Building2, Paperclip } from 'lucide-react';
+import { X, Filter, DollarSign, Building2, Paperclip, Hash, Calendar } from 'lucide-react';
 import { SearchPreferences } from '../hooks/useSearchFilters';
 
 interface Space {
@@ -26,7 +26,7 @@ export default function SearchFilters({
 }: SearchFiltersProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
 
-  const hasActiveFilters = 
+  const hasActiveFilters =
     filters.tipoDocumento !== 'todos' ||
     filters.valorMinimo !== undefined ||
     filters.valorMaximo !== undefined ||
@@ -49,7 +49,7 @@ export default function SearchFilters({
               <span className="w-2 h-2 bg-primary rounded-full" />
             )}
           </button>
-          
+
           {resultCount !== undefined && (
             <span className="text-sm text-on-surface-variant">
               <strong className="text-on-surface font-bold">{resultCount}</strong> resultado{resultCount !== 1 ? 's' : ''}
@@ -123,6 +123,84 @@ export default function SearchFilters({
             </select>
           </div>
 
+          {/* Número de Factura */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
+              Número de Factura
+            </label>
+            <div className="relative">
+              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" />
+              <input
+                type="text"
+                value={filters.numeroFactura || ''}
+                onChange={(e) => onUpdateFilter('numeroFactura', e.target.value || undefined)}
+                placeholder="Buscar por número..."
+                className="w-full bg-surface-container-high/50 border-none rounded-xl py-2.5 pl-10 pr-3 text-sm focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+
+          {/* Fecha - Año */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
+              Año
+            </label>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" />
+              <input
+                type="number"
+                value={filters.fechaAnio || ''}
+                onChange={(e) => onUpdateFilter('fechaAnio', e.target.value || undefined)}
+                placeholder="2024"
+                min="2000"
+                max="2099"
+                className="w-full bg-surface-container-high/50 border-none rounded-xl py-2.5 pl-10 pr-3 text-sm focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+
+          {/* Fecha - Mes */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
+              Mes
+            </label>
+            <select
+              value={filters.fechaMes || ''}
+              onChange={(e) => onUpdateFilter('fechaMes', e.target.value || undefined)}
+              className="w-full bg-surface-container-high/50 border-none rounded-xl py-2.5 px-3 text-sm focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">Todos</option>
+              <option value="01">Enero</option>
+              <option value="02">Febrero</option>
+              <option value="03">Marzo</option>
+              <option value="04">Abril</option>
+              <option value="05">Mayo</option>
+              <option value="06">Junio</option>
+              <option value="07">Julio</option>
+              <option value="08">Agosto</option>
+              <option value="09">Septiembre</option>
+              <option value="10">Octubre</option>
+              <option value="11">Noviembre</option>
+              <option value="12">Diciembre</option>
+            </select>
+          </div>
+
+          {/* Fecha - Día */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
+              Día
+            </label>
+            <input
+              type="number"
+              value={filters.fechaDia || ''}
+              onChange={(e) => onUpdateFilter('fechaDia', e.target.value || undefined)}
+              placeholder="DD"
+              min="1"
+              max="31"
+              className="w-full bg-surface-container-high/50 border-none rounded-xl py-2.5 px-3 text-sm focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
           {/* Valor Mínimo */}
           <div className="space-y-2">
             <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
@@ -164,11 +242,10 @@ export default function SearchFilters({
             </label>
             <button
               onClick={() => onUpdateFilter('conArchivo', filters.conArchivo ? undefined : true)}
-              className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium transition-all ${
-                filters.conArchivo
-                  ? 'bg-primary text-white'
-                  : 'bg-surface-container-high/50 text-on-surface-variant hover:bg-surface-container-high'
-              }`}
+              className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium transition-all ${filters.conArchivo
+                ? 'bg-primary text-white'
+                : 'bg-surface-container-high/50 text-on-surface-variant hover:bg-surface-container-high'
+                }`}
             >
               <Paperclip className="w-4 h-4" />
               {filters.conArchivo ? 'Solo con archivos' : 'Todos'}

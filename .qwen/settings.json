@@ -4,7 +4,8 @@
       "Bash(cmd *)",
       "Bash(select-object *)",
       "Bash(npx *)",
-      "Bash(type *)"
+      "Bash(type *)",
+      "Bash(npm run *)"
     ]
   },
   "$version": 3

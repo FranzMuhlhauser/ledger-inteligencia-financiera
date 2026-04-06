@@ -26,6 +26,10 @@ export interface SearchPreferences {
   proveedor?: string;
   conArchivo?: boolean;
   spaceId?: string;
+  numeroFactura?: string;
+  fechaAnio?: string;
+  fechaMes?: string;
+  fechaDia?: string;
 }
 
 // Recent search item
@@ -93,6 +97,10 @@ export function useSearchFilters() {
         proveedor: undefined,
         conArchivo: undefined,
         spaceId: undefined,
+        numeroFactura: undefined,
+        fechaAnio: undefined,
+        fechaMes: undefined,
+        fechaDia: undefined,
       };
     } catch {
       return {
@@ -103,6 +111,10 @@ export function useSearchFilters() {
         proveedor: undefined,
         conArchivo: undefined,
         spaceId: undefined,
+        numeroFactura: undefined,
+        fechaAnio: undefined,
+        fechaMes: undefined,
+        fechaDia: undefined,
       };
     }
   });
@@ -124,6 +136,10 @@ export function useSearchFilters() {
       proveedor: undefined,
       conArchivo: undefined,
       spaceId: undefined,
+      numeroFactura: undefined,
+      fechaAnio: undefined,
+      fechaMes: undefined,
+      fechaDia: undefined,
     });
   }, []);
 
@@ -135,7 +151,11 @@ export function useSearchFilters() {
       filters.valorMaximo !== undefined ||
       filters.proveedor !== undefined ||
       filters.conArchivo !== undefined ||
-      filters.spaceId !== undefined
+      filters.spaceId !== undefined ||
+      filters.numeroFactura !== undefined ||
+      filters.fechaAnio !== undefined ||
+      filters.fechaMes !== undefined ||
+      filters.fechaDia !== undefined
     );
   }, [filters]);
 
