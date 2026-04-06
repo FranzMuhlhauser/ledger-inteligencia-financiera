@@ -5,7 +5,9 @@
       "Bash(select-object *)",
       "Bash(npx *)",
       "Bash(type *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(select-string *)",
+      "Bash(git restore *)"
     ]
   },
   "$version": 3
