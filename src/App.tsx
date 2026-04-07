@@ -930,42 +930,17 @@ export default function App() {
       tipoDocumento: formData.tipoDocumento,
     };
 
-    // Validate file before uploading
+    // DESHABILITADO: Subida de archivos para ahorrar espacio en Storage
+    // Para reactivar, descomentar este bloque:
+    /*
     let archivoUrl = '';
     let archivoNombre = '';
     if (fileToUpload) {
-      const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-      if (!allowed.includes(fileToUpload.type)) {
-        toast.showError('Tipo de archivo no permitido. Solo PDF, JPG o PNG.');
-        return;
-      }
-      if (fileToUpload.size > 5 * 1024 * 1024) {
-        toast.showError('El archivo no puede superar 5 MB.');
-        return;
-      }
-
-      try {
-        // Compress image files before upload
-        const fileToSave = fileToUpload.type.startsWith('image/')
-          ? await processFileForUpload(fileToUpload, 2)
-          : fileToUpload;
-
-        const path = `${user.id}/${newInvoice.id}-${fileToSave.name}`;
-        const { error: uploadError } = await supabase.storage.from('receipts').upload(path, fileToSave);
-        if (uploadError) {
-          toast.showError('Error al subir el archivo. Verifica que el bucket "receipts" exista en Supabase Storage.');
-          return;
-        }
-        archivoUrl = path;
-        archivoNombre = fileToSave.name;
-        newInvoice.archivoUrl = archivoUrl;
-        newInvoice.archivoNombre = archivoNombre;
-      } catch (error) {
-        console.error('Error processing file:', error);
-        toast.showError('Error al procesar el archivo. Inténtalo de nuevo.');
-        return;
-      }
+      ...
     }
+    */
+    const archivoUrl = '';
+    const archivoNombre = '';
 
     try {
       console.log('Attempting to save invoice:', { newInvoice, userId: user.id });
@@ -1954,7 +1929,7 @@ export default function App() {
                           className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20"
                         />
                       </div>
-                      <div className="col-span-2 space-y-2">
+                      {/* <div className="col-span-2 space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Archivo Adjunto (Opcional)</label>
                         <input
                           type="file"
@@ -1962,7 +1937,7 @@ export default function App() {
                           onChange={(e) => setFileToUpload(e.target.files?.[0] || null)}
                           className="w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/90 cursor-pointer"
                         />
-                      </div>
+                      </div> */}
                       <div className="space-y-2">
                         <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Valor Neto</label>
                         <div className="relative">
