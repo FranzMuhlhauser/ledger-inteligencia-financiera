@@ -1,6 +1,7 @@
 import React from 'react';
-import { Building2, Calendar, Hash, X } from 'lucide-react';
+import { Calendar, Hash, X } from 'lucide-react';
 import { SearchPreferences } from '../hooks/useSearchFilters';
+import ProveedorFilterField from './ProveedorFilterField';
 
 interface Space {
   id: string;
@@ -12,6 +13,11 @@ interface HeaderSearchFiltersProps {
   onUpdateFilter: <K extends keyof SearchPreferences>(key: K, value: SearchPreferences[K]) => void;
   onClearStructured: () => void;
   spaces: Space[];
+  savedProveedores: string[];
+  onCommitProveedor: (raw: string) => void;
+  onRemoveSavedProveedor: (name: string) => void;
+  onImportProveedoresFromInvoices: () => void;
+  importProveedoresDisabled: boolean;
 }
 
 export default function HeaderSearchFilters({
@@ -19,6 +25,11 @@ export default function HeaderSearchFilters({
   onUpdateFilter,
   onClearStructured,
   spaces,
+  savedProveedores,
+  onCommitProveedor,
+  onRemoveSavedProveedor,
+  onImportProveedoresFromInvoices,
+  importProveedoresDisabled,
 }: HeaderSearchFiltersProps) {
   const headerActive =
     filters.tipoDocumento !== 'todos' ||
@@ -91,19 +102,33 @@ export default function HeaderSearchFilters({
         </div>
 
         <div className="space-y-1.5 sm:col-span-2">
-          <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
-            Proveedor
-          </label>
-          <div className="relative">
-            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4 pointer-events-none" />
-            <input
-              type="text"
-              value={filters.proveedor || ''}
-              onChange={(e) => onUpdateFilter('proveedor', e.target.value || undefined)}
-              placeholder="Nombre o parte del proveedor…"
-              className="w-full bg-surface-container-low border-none rounded-xl py-2 pl-10 pr-3 text-sm focus:ring-2 focus:ring-primary/20"
-            />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">
+              Proveedor
+            </label>
+            <button
+              type="button"
+              disabled={importProveedoresDisabled}
+              onClick={onImportProveedoresFromInvoices}
+              className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed shrink-0"
+              title={
+                importProveedoresDisabled
+                  ? 'Cargá facturas primero'
+                  : 'Agregar a la lista todos los proveedores que aparecen en tus facturas cargadas'
+              }
+            >
+              Importar desde facturas
+            </button>
           </div>
+          <ProveedorFilterField
+            value={filters.proveedor || ''}
+            onValueChange={(v) => onUpdateFilter('proveedor', v)}
+            savedProveedores={savedProveedores}
+            onCommitProvider={onCommitProveedor}
+            onRemoveSaved={onRemoveSavedProveedor}
+            inputClassName="w-full bg-surface-container-low border-none rounded-xl py-2 pl-10 pr-3 text-sm focus:ring-2 focus:ring-primary/20"
+            chipsClassName="max-h-28 overflow-y-auto"
+          />
         </div>
 
         <div className="space-y-1.5 sm:col-span-2">

@@ -56,6 +56,11 @@ import { useAuth } from './contexts/AuthContext';
 import { useToast } from './contexts/ToastContext';
 import { useLazyLoad } from './hooks/useLazyLoad';
 import { useDebounce, useSearchFilters, useRecentSearches, SearchPreferences } from './hooks/useSearchFilters';
+import {
+  useSavedProveedores,
+  LEDGER_SAVED_PROVEEDORES_DATALIST_ID,
+  countNewProveedoresForImport,
+} from './hooks/useSavedProveedores';
 import { supabase } from './lib/supabase';
 import {
   BarChart,
@@ -378,6 +383,8 @@ export default function App() {
 
   // Search state with debounce and filters
   const { filters: searchFilters, updateFilter, clearFilters, applyFilters, clearStructuredFilters, hasActiveFilters } = useSearchFilters();
+  const { savedProveedores, addSavedProveedor, removeSavedProveedor, importProveedoresFromInvoices } =
+    useSavedProveedores();
   const { recentSearches, addSearch, removeSearch, clearSearches } = useRecentSearches(10);
   const [showRecentSearches, setShowRecentSearches] = useState(false);
   const [isHoveringRecent, setIsHoveringRecent] = useState(false);
@@ -818,6 +825,7 @@ export default function App() {
       }
 
       console.log('Invoice saved successfully');
+      addSavedProveedor(newInvoice.proveedor);
       toast.showSuccess('Factura registrada exitosamente');
     } catch (error: any) {
       console.error('Error saving invoice:', error);
@@ -836,6 +844,20 @@ export default function App() {
     invoiceNumberRef.current?.focus();
   };
 
+  const handleImportProveedoresFromInvoices = useCallback(() => {
+    if (invoices.length === 0) {
+      toast.showInfo('No hay facturas cargadas para importar proveedores.');
+      return;
+    }
+    const names = invoices.map((i) => i.proveedor);
+    const added = countNewProveedoresForImport(names, savedProveedores);
+    importProveedoresFromInvoices(names);
+    if (added > 0) {
+      toast.showSuccess(`Se agregaron ${added} proveedor(es) nuevos a la lista guardada.`);
+    } else {
+      toast.showInfo('Todos los proveedores de tus facturas ya estaban en la lista guardada.');
+    }
+  }, [invoices, savedProveedores, importProveedoresFromInvoices, toast]);
 
   const handleSaveSettings = () => {
     setSettings(tempSettings);
@@ -910,6 +932,11 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-surface">
+      <datalist id={LEDGER_SAVED_PROVEEDORES_DATALIST_ID}>
+        {savedProveedores.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
       {/* Sidebar */}
       <aside className="w-60 bg-surface-container-low flex flex-col py-8 px-4 fixed h-full" role="navigation" aria-label="Menú principal">
         <div className="flex items-center gap-3 px-4 mb-12">
@@ -1088,6 +1115,11 @@ export default function App() {
                     onUpdateFilter={updateFilter}
                     onClearStructured={clearStructuredFilters}
                     spaces={spaces}
+                    savedProveedores={savedProveedores}
+                    onCommitProveedor={addSavedProveedor}
+                    onRemoveSavedProveedor={removeSavedProveedor}
+                    onImportProveedoresFromInvoices={handleImportProveedoresFromInvoices}
+                    importProveedoresDisabled={invoices.length === 0}
                   />
                 </motion.div>
               )}
@@ -1456,9 +1488,15 @@ export default function App() {
                         <input
                           type="text"
                           name="proveedor"
+                          list={LEDGER_SAVED_PROVEEDORES_DATALIST_ID}
                           value={formData.proveedor}
                           onChange={handleInputChange}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v.length >= 3) addSavedProveedor(v);
+                          }}
                           placeholder="ej. Global Logistics Corp"
+                          autoComplete="off"
                           aria-invalid={!!formErrors.proveedor}
                           aria-describedby={formErrors.proveedor ? 'proveedor-error' : undefined}
                           className={`w-full bg-surface-container-high/50 border-none rounded-xl py-3 px-4 focus:ring-2 focus:ring-primary/20 ${formErrors.proveedor ? 'ring-2 ring-rose-500 bg-rose-50' : ''
@@ -1626,6 +1664,11 @@ export default function App() {
                     onClearFilters={clearFilters}
                     spaces={spaces}
                     resultCount={filteredInvoices.length}
+                    savedProveedores={savedProveedores}
+                    onCommitProveedor={addSavedProveedor}
+                    onRemoveSavedProveedor={removeSavedProveedor}
+                    onImportProveedoresFromInvoices={handleImportProveedoresFromInvoices}
+                    importProveedoresDisabled={invoices.length === 0}
                   />
 
                   <div className="bg-surface-container-lowest rounded-[2rem] overflow-hidden shadow-sm border border-surface-container-low">
