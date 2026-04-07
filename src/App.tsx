@@ -380,7 +380,7 @@ export default function App() {
   const { recentSearches, addSearch, removeSearch, clearSearches } = useRecentSearches(10);
   const [showRecentSearches, setShowRecentSearches] = useState(false);
   const [isHoveringRecent, setIsHoveringRecent] = useState(false);
-  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(true);
 
   // Debounced search query (300ms delay)
   const debouncedSearchQuery = useDebounce(searchFilters.searchQuery, 300);
@@ -996,13 +996,15 @@ export default function App() {
                 </button>
               )}
               <button
-                onClick={() => setShowFiltersPanel(!showFiltersPanel)}
-                className={`p-1 rounded-lg transition-colors ${hasActiveFilters ? 'bg-primary/10 text-primary' : 'hover:bg-surface-container-high text-on-surface-variant'
+                onClick={() => {
+                  document.querySelector('.bg-surface-container-lowest')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className={`p-1.5 rounded-lg transition-all ${hasActiveFilters ? 'bg-primary text-white shadow-md' : 'hover:bg-surface-container-high text-on-surface-variant'
                   }`}
-                aria-label="Filtros de búsqueda"
-                title="Filtros avanzados"
+                aria-label="Ir a filtros"
+                title="Ir a filtros avanzados"
               >
-                <Filter className="w-3.5 h-3.5" />
+                <Filter className="w-4 h-4" />
               </button>
             </div>
 
@@ -1558,16 +1560,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Search Filters Panel */}
-                  {showFiltersPanel && (
-                    <SearchFilters
-                      filters={searchFilters}
-                      onUpdateFilter={updateFilter}
-                      onClearFilters={clearFilters}
-                      spaces={spaces}
-                      resultCount={filteredInvoices.length}
-                    />
-                  )}
+                  {/* Search Filters Panel - Always Visible */}
+                  <SearchFilters
+                    filters={searchFilters}
+                    onUpdateFilter={updateFilter}
+                    onClearFilters={clearFilters}
+                    spaces={spaces}
+                    resultCount={filteredInvoices.length}
+                  />
 
                   <div className="bg-surface-container-lowest rounded-[2rem] overflow-hidden shadow-sm border border-surface-container-low">
                     <table className="w-full text-left border-collapse">
