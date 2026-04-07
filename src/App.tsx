@@ -84,6 +84,10 @@ import {
   Pie
 } from 'recharts';
 import LoginPage from './LoginPage';
+import OnboardingTour from './components/OnboardingTour';
+import UndoToast from './components/UndoToast';
+import { useUndoDelete } from './hooks/useUndoDelete';
+import { autoCategorizeInvoice } from './utils/aiCategorization';
 
 // --- Types ---
 interface Space {
@@ -348,6 +352,20 @@ function SpaceDetailView({ space, invoices, onClose, onDeleteInvoice }: SpaceDet
 export default function App() {
   const { user, signOut, loading: authLoading } = useAuth();
   const toast = useToast();
+  const { pendingDeleteId, scheduleDelete, undoDelete, cancelPendingDelete } = useUndoDelete();
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [undoToast, setUndoToast] = useState<{
+    visible: boolean;
+    message: string;
+    itemId: string | null;
+    itemType: 'invoice' | 'space' | null;
+    restoreFn?: () => void;
+  }>({
+    visible: false,
+    message: '',
+    itemId: null,
+    itemType: null
+  });
   const [activeTab, setActiveTab] = useState('Panel Control');
   const invoiceNumberRef = React.useRef<HTMLInputElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -494,27 +512,45 @@ export default function App() {
   const deleteSpace = async (spaceId: string) => {
     if (!user) return;
 
-    // Confirm before deleting
-    if (!window.confirm('¿Estás seguro de que quieres eliminar este espacio? Las facturas asociadas quedarán sin categoría.')) {
-      return;
-    }
+    const spaceToDelete = spaces.find(s => s.id === spaceId);
+    if (!spaceToDelete) return;
 
     try {
-      const { error } = await supabase
-        .from('spaces')
-        .delete()
-        .eq('id', spaceId);
-
-      if (error) {
-        console.error('Error deleting space:', error);
-        toast.showError('Error al eliminar el espacio. Por favor, intenta de nuevo.');
-        return;
-      }
-
+      // Optimistic update
       setSpaces(prev => prev.filter(s => s.id !== spaceId));
-      toast.showSuccess('Espacio eliminado correctamente');
+
+      // Schedule permanent delete after 5 seconds
+      scheduleDelete(spaceId, async (id) => {
+        try {
+          const { error } = await supabase
+            .from('spaces')
+            .delete()
+            .eq('id', id);
+
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error deleting space:', error);
+          toast.showError('Error al eliminar el espacio.');
+        }
+      });
+
+      // Show undo toast
+      setUndoToast({
+        visible: true,
+        message: `Espacio "${spaceToDelete.nombre}" eliminado`,
+        itemId: spaceId,
+        itemType: 'space',
+        restoreFn: () => {
+          setSpaces(prev => [...prev, spaceToDelete]);
+          cancelPendingDelete();
+        }
+      });
+
+      toast.showSuccess('Espacio eliminado. Puedes deshacer esta acciÃ³n en 5 segundos.');
     } catch (error) {
       console.error('Error deleting space:', error);
+      // Rollback
+      setSpaces(prev => [...prev, spaceToDelete]);
       toast.showError('Error al eliminar el espacio. Por favor, intenta de nuevo.');
     }
   };
@@ -856,6 +892,29 @@ export default function App() {
 
     const randomColor = INVOICE_COLORS[Math.floor(Math.random() * INVOICE_COLORS.length)];
 
+    // Auto-categorize with AI if no space is selected and description exists
+    let autoCategorizedSpaceId = selectedSpaceId;
+    if (!selectedSpaceId && formData.descripcion && spaces.length > 0) {
+      try {
+        const suggestedSpaceId = await autoCategorizeInvoice(
+          formData.proveedor,
+          formData.descripcion,
+          formData.tipoDocumento,
+          valorNetoNum,
+          spaces
+        );
+        if (suggestedSpaceId) {
+          autoCategorizedSpaceId = suggestedSpaceId;
+          const space = spaces.find(s => s.id === suggestedSpaceId);
+          if (space) {
+            toast.showInfo(`Sugerencia IA: Factura categorizada automÃ¡ticamente en "${space.nombre}"`);
+          }
+        }
+      } catch (error) {
+        console.warn('Auto-categorizaciÃ³n con IA fallÃ³, continuando sin categorÃ­a:', error);
+      }
+    }
+
     const newInvoice: Invoice = {
       id: crypto.randomUUID(),
       numeroFactura: formData.numeroFactura,
@@ -866,7 +925,7 @@ export default function App() {
       valorTotal: calculatedTotal,
       initials,
       color: randomColor,
-      spaceId: selectedSpaceId,
+      spaceId: autoCategorizedSpaceId,
       descripcion: formData.descripcion,
       tipoDocumento: formData.tipoDocumento,
     };
@@ -925,7 +984,7 @@ export default function App() {
           valor_neto: newInvoice.valorNeto,
           iva: newInvoice.iva,
           valor_total: newInvoice.valorTotal,
-          space_id: newInvoice.spaceId || null,
+          space_id: autoCategorizedSpaceId || null,
           descripcion: newInvoice.descripcion,
           tipo_documento: newInvoice.tipoDocumento,
           archivo_url: archivoUrl || null,
@@ -1025,13 +1084,34 @@ export default function App() {
       // Optimistic update
       setInvoices(prev => prev.filter(inv => inv.id !== id));
 
-      const { error } = await supabase
-        .from('invoices')
-        .delete()
-        .eq('id', id);
+      // Schedule permanent delete after 5 seconds
+      scheduleDelete(id, async (invoiceId) => {
+        try {
+          const { error } = await supabase
+            .from('invoices')
+            .delete()
+            .eq('id', invoiceId);
 
-      if (error) throw error;
-      toast.showSuccess('Factura eliminada correctamente');
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error deleting invoice:', error);
+          toast.showError('Error al eliminar la factura.');
+        }
+      });
+
+      // Show undo toast
+      setUndoToast({
+        visible: true,
+        message: 'Factura eliminada',
+        itemId: id,
+        itemType: 'invoice',
+        restoreFn: () => {
+          setInvoices(prev => [invoiceToDelete, ...prev].sort((a, b) => b.fecha.localeCompare(a.fecha)));
+          cancelPendingDelete();
+        }
+      });
+
+      toast.showSuccess('Factura eliminada. Puedes deshacer esta acciÃ³n en 5 segundos.');
     } catch (error) {
       console.error('Error deleting invoice:', error);
       // Rollback
@@ -1061,6 +1141,19 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-surface">
+      <OnboardingTour onComplete={() => setShowOnboarding(false)} />
+      <UndoToast
+        message={undoToast.message}
+        visible={undoToast.visible}
+        onUndo={() => {
+          if (undoToast.restoreFn) {
+            undoToast.restoreFn();
+          }
+          setUndoToast({ visible: false, message: '', itemId: null, itemType: null });
+          toast.showSuccess('AcciÃ³n deshecha correctamente');
+        }}
+        onDismiss={() => setUndoToast({ visible: false, message: '', itemId: null, itemType: null })}
+      />
       <datalist id={LEDGER_SAVED_PROVEEDORES_DATALIST_ID}>
         {savedProveedores.map((p) => (
           <option key={p} value={p} />
@@ -1331,11 +1424,10 @@ export default function App() {
                         key={key}
                         id={`dashboard-period-${key}`}
                         onClick={() => setDashboardPeriod(key)}
-                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 ${
-                          dashboardPeriod === key
-                            ? 'bg-primary text-white shadow-md'
-                            : 'text-on-surface-variant hover:bg-surface-container-high'
-                        }`}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 ${dashboardPeriod === key
+                          ? 'bg-primary text-white shadow-md'
+                          : 'text-on-surface-variant hover:bg-surface-container-high'
+                          }`}
                       >
                         {label}
                       </button>
@@ -1490,9 +1582,8 @@ export default function App() {
                                 initial={{ width: 0 }}
                                 animate={{ width: `${prov.pct}%` }}
                                 transition={{ duration: 0.6, delay: idx * 0.08 }}
-                                className={`h-full rounded-full ${
-                                  idx === 0 ? 'bg-primary' : idx === 1 ? 'bg-primary/70' : idx === 2 ? 'bg-primary/50' : 'bg-primary/30'
-                                }`}
+                                className={`h-full rounded-full ${idx === 0 ? 'bg-primary' : idx === 1 ? 'bg-primary/70' : idx === 2 ? 'bg-primary/50' : 'bg-primary/30'
+                                  }`}
                               />
                             </div>
                           </div>
