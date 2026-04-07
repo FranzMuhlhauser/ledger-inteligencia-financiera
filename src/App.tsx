@@ -6,7 +6,6 @@ import {
   Settings,
   Search,
   Bell,
-
   Calendar,
   Plus,
   ChevronDown,
@@ -41,7 +40,14 @@ import {
   CheckCircle2,
   Paperclip,
   Clock,
-  Filter
+  Filter,
+  Receipt,
+  ArrowRight,
+  TrendingDown,
+  Activity,
+  Layers,
+  ChevronRight,
+  Target
 } from 'lucide-react';
 import EditSpaceModal from './components/EditSpaceModal';
 import InvoiceDetailModal from './components/InvoiceDetailModal';
@@ -61,6 +67,7 @@ import {
   LEDGER_SAVED_PROVEEDORES_DATALIST_ID,
   countNewProveedoresForImport,
 } from './hooks/useSavedProveedores';
+import { filterByDateScope, hasProveedorImportDateScope } from './utils/invoiceDateScope';
 import { supabase } from './lib/supabase';
 import {
   BarChart,
@@ -602,6 +609,9 @@ export default function App() {
   const calculatedIva = Math.round(valorNetoNum * ivaRate);
   const calculatedTotal = valorNetoNum + calculatedIva;
 
+  // --- Dashboard Period Selector ---
+  const [dashboardPeriod, setDashboardPeriod] = useState<'month' | 'quarter' | 'year' | 'all'>('month');
+
   // --- Summary Calculations ---
   const totalExpenditure = useMemo(() => {
     return invoices.reduce((sum, inv) => sum + inv.valorTotal, 0);
@@ -609,7 +619,110 @@ export default function App() {
 
   const activeInvoicesCount = invoices.length;
 
+  // --- Dashboard Period-Filtered Invoices ---
+  const dashboardInvoices = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-indexed
+
+    return invoices.filter(inv => {
+      const d = new Date(inv.fecha + 'T00:00:00');
+      if (dashboardPeriod === 'month') {
+        return d.getFullYear() === year && d.getMonth() === month;
+      } else if (dashboardPeriod === 'quarter') {
+        const qStart = new Date(year, Math.floor(month / 3) * 3, 1);
+        return d >= qStart;
+      } else if (dashboardPeriod === 'year') {
+        return d.getFullYear() === year;
+      }
+      return true; // 'all'
+    });
+  }, [invoices, dashboardPeriod]);
+
+  // --- Dashboard Computed Metrics ---
+  const dashboardTotalGasto = useMemo(() => dashboardInvoices.reduce((s, i) => s + i.valorTotal, 0), [dashboardInvoices]);
+  const dashboardTotalIva = useMemo(() => dashboardInvoices.reduce((s, i) => s + i.iva, 0), [dashboardInvoices]);
+  const dashboardPromedioPorFactura = useMemo(() => dashboardInvoices.length > 0 ? dashboardTotalGasto / dashboardInvoices.length : 0, [dashboardTotalGasto, dashboardInvoices]);
+  const dashboardEspaciosActivos = useMemo(() => new Set(dashboardInvoices.filter(i => i.spaceId).map(i => i.spaceId)).size, [dashboardInvoices]);
+  const dashboardProveedoresUnicos = useMemo(() => new Set(dashboardInvoices.map(i => i.proveedor)).size, [dashboardInvoices]);
+
+  // --- Dashboard Top Providers ---
+  const dashboardTopProviders = useMemo(() => {
+    const grouped: Record<string, { total: number; count: number }> = {};
+    dashboardInvoices.forEach(inv => {
+      if (!grouped[inv.proveedor]) grouped[inv.proveedor] = { total: 0, count: 0 };
+      grouped[inv.proveedor].total += inv.valorTotal;
+      grouped[inv.proveedor].count += 1;
+    });
+    const sorted = Object.entries(grouped)
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+    const maxTotal = sorted[0]?.total || 1;
+    return sorted.map(p => ({ ...p, pct: Math.round((p.total / maxTotal) * 100) }));
+  }, [dashboardInvoices]);
+
+  // --- Dashboard Space Breakdown ---
+  const dashboardSpaceData = useMemo(() => {
+    return spaces.map(space => {
+      const spaceInvs = dashboardInvoices.filter(i => i.spaceId === space.id);
+      return {
+        name: space.nombre,
+        total: spaceInvs.reduce((s, i) => s + i.valorTotal, 0),
+        count: spaceInvs.length,
+        color: space.color,
+      };
+    }).filter(s => s.total > 0).sort((a, b) => b.total - a.total);
+  }, [dashboardInvoices, spaces]);
+
+  // --- Dashboard Recent Invoices (last 5) ---
+  const dashboardRecentInvoices = useMemo(() => {
+    return [...invoices]
+      .sort((a, b) => b.fecha.localeCompare(a.fecha))
+      .slice(0, 5);
+  }, [invoices]);
+
+  // --- Dashboard Trend Chart Data ---
+  const dashboardChartData = useMemo(() => {
+    const grouped = dashboardInvoices.reduce((acc: any, inv) => {
+      const month = inv.fecha.slice(0, 7);
+      acc[month] = (acc[month] || 0) + inv.valorTotal;
+      return acc;
+    }, {});
+    return Object.entries(grouped)
+      .map(([name, total]) => ({ name, total: total as number }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [dashboardInvoices]);
+
+  // --- Dashboard Provider Pie Data ---
+  const dashboardProviderPieData = useMemo(() => {
+    const grouped = dashboardInvoices.reduce((acc: any, inv) => {
+      acc[inv.proveedor] = (acc[inv.proveedor] || 0) + inv.valorTotal;
+      return acc;
+    }, {});
+    return Object.entries(grouped)
+      .map(([name, value]) => ({ name, value: value as number }))
+      .sort((a: any, b: any) => b.value - a.value)
+      .slice(0, 5);
+  }, [dashboardInvoices]);
+
   // --- Analysis Data ---
+  const invoicesForProveedorImport = useMemo(
+    () => filterByDateScope<Invoice>(invoices, dateFrom, dateTo, searchFilters),
+    [invoices, dateFrom, dateTo, searchFilters]
+  );
+
+  const importProveedoresTitle = useMemo(() => {
+    if (invoices.length === 0) return 'No hay facturas cargadas';
+    if (invoicesForProveedorImport.length === 0) {
+      return 'No hay facturas en el rango de fechas actual (Análisis o año/mes/día en filtros)';
+    }
+    if (hasProveedorImportDateScope(dateFrom, dateTo, searchFilters)) {
+      return `Agregar proveedores de ${invoicesForProveedorImport.length} factura(s) en el rango de fechas actual`;
+    }
+    return `Agregar proveedores de todas las facturas (${invoices.length}). Definí fechas en Análisis o año/mes/día aquí para acotar.`;
+  }, [invoices, invoicesForProveedorImport, dateFrom, dateTo, searchFilters]);
+
   const filteredInvoices = useMemo(() => {
     let result = invoices.filter(inv => {
       // Date filter (dateFrom/dateTo range)
@@ -849,15 +962,31 @@ export default function App() {
       toast.showInfo('No hay facturas cargadas para importar proveedores.');
       return;
     }
-    const names = invoices.map((i) => i.proveedor);
+    const scoped = filterByDateScope<Invoice>(invoices, dateFrom, dateTo, searchFilters);
+    if (scoped.length === 0) {
+      toast.showInfo('No hay facturas en el rango de fechas seleccionado (revisá fechas en Análisis o año/mes/día en filtros).');
+      return;
+    }
+    const names = scoped.map((i: Invoice) => i.proveedor);
     const added = countNewProveedoresForImport(names, savedProveedores);
     importProveedoresFromInvoices(names);
+    const scopeMsg = hasProveedorImportDateScope(dateFrom, dateTo, searchFilters)
+      ? ` (${scoped.length} factura(s) en el rango de fechas)`
+      : '';
     if (added > 0) {
-      toast.showSuccess(`Se agregaron ${added} proveedor(es) nuevos a la lista guardada.`);
+      toast.showSuccess(`Se agregaron ${added} proveedor(es) nuevos a la lista guardada${scopeMsg}.`);
     } else {
-      toast.showInfo('Todos los proveedores de tus facturas ya estaban en la lista guardada.');
+      toast.showInfo(`Todos los proveedores de ese conjunto ya estaban en la lista guardada${scopeMsg}.`);
     }
-  }, [invoices, savedProveedores, importProveedoresFromInvoices, toast]);
+  }, [invoices, dateFrom, dateTo, searchFilters, savedProveedores, importProveedoresFromInvoices, toast]);
+
+  const handleApplyHeaderFilters = useCallback(() => {
+    setShowHeaderFilters(false);
+    setActiveTab('Facturas');
+    requestAnimationFrame(() => {
+      document.getElementById('facturas-registro')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
 
   const handleSaveSettings = () => {
     setSettings(tempSettings);
@@ -1119,7 +1248,9 @@ export default function App() {
                     onCommitProveedor={addSavedProveedor}
                     onRemoveSavedProveedor={removeSavedProveedor}
                     onImportProveedoresFromInvoices={handleImportProveedoresFromInvoices}
-                    importProveedoresDisabled={invoices.length === 0}
+                    importProveedoresDisabled={invoicesForProveedorImport.length === 0}
+                    importProveedoresTitle={importProveedoresTitle}
+                    onApplyFilters={handleApplyHeaderFilters}
                   />
                 </motion.div>
               )}
@@ -1180,83 +1311,295 @@ export default function App() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="space-y-10"
+                className="space-y-8"
               >
+                {/* Header + Period Selector */}
                 <div className="flex items-end justify-between">
                   <div>
                     <h2 className="text-4xl font-extrabold text-primary tracking-tight">Panel de Control</h2>
                     <p className="text-on-surface-variant mt-2 text-lg">Resumen ejecutivo de tu salud financiera.</p>
                   </div>
-                  <div className="flex items-center gap-2 bg-surface-container-low px-4 py-2 rounded-xl text-primary font-bold text-sm">
-                    <Calendar className="w-4 h-4" />
-                    <span className="uppercase tracking-widest">{new Date().toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }).toUpperCase()}</span>
+                  {/* MEJORA 1: Selector de Período */}
+                  <div className="flex items-center gap-1 bg-surface-container-low p-1 rounded-2xl">
+                    {([
+                      { key: 'month', label: 'Este Mes' },
+                      { key: 'quarter', label: 'Trimestre' },
+                      { key: 'year', label: 'Este Año' },
+                      { key: 'all', label: 'Todo' },
+                    ] as const).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        id={`dashboard-period-${key}`}
+                        onClick={() => setDashboardPeriod(key)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 ${
+                          dashboardPeriod === key
+                            ? 'bg-primary text-white shadow-md'
+                            : 'text-on-surface-variant hover:bg-surface-container-high'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-12 gap-8">
-                  <div className="col-span-4 bg-surface-container-lowest rounded-[2rem] p-8 shadow-sm border border-surface-container-low">
-                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center mb-6">
-                      <DollarSign className="text-primary w-5 h-5" />
+                {/* MEJORA 2: Cards de Métricas - Fila 1: Totales globales */}
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <div className="flex items-start justify-between mb-5">
+                      <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
+                        <DollarSign className="text-primary w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold text-on-surface-variant bg-surface-container-low px-2 py-1 rounded-lg">TOTAL</span>
                     </div>
                     <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-on-surface-variant mb-1">Gasto Total</p>
                     <h4 className="text-3xl font-extrabold text-on-surface">${totalExpenditure.toLocaleString('es-CL')}</h4>
+                    <p className="text-xs text-on-surface-variant mt-2">{invoices.length} facturas en total</p>
                   </div>
-                  <div className="col-span-4 bg-surface-container-lowest rounded-[2rem] p-8 shadow-sm border border-surface-container-low">
-                    <div className="w-10 h-10 bg-secondary/10 rounded-xl flex items-center justify-center mb-6">
-                      <FileText className="text-secondary w-5 h-5" />
+                  <div className="bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <div className="flex items-start justify-between mb-5">
+                      <div className="w-10 h-10 bg-secondary/10 rounded-xl flex items-center justify-center">
+                        <FileText className="text-secondary w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold text-on-surface-variant bg-surface-container-low px-2 py-1 rounded-lg">TOTAL</span>
                     </div>
                     <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-on-surface-variant mb-1">Facturas Registradas</p>
                     <h4 className="text-3xl font-extrabold text-on-surface">{invoices.length}</h4>
+                    <p className="text-xs text-on-surface-variant mt-2">{new Set(invoices.map(i => i.proveedor)).size} proveedores distintos</p>
                   </div>
-                  <div className="col-span-4 bg-surface-container-lowest rounded-[2rem] p-8 shadow-sm border border-surface-container-low">
-                    <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center mb-6">
-                      <Building2 className="text-emerald-600 w-5 h-5" />
+                  <div className="bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <div className="flex items-start justify-between mb-5">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                        <Building2 className="text-emerald-600 w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold text-on-surface-variant bg-surface-container-low px-2 py-1 rounded-lg">TOTAL</span>
                     </div>
                     <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-on-surface-variant mb-1">Proveedores Activos</p>
                     <h4 className="text-3xl font-extrabold text-on-surface">{new Set(invoices.map(i => i.proveedor)).size}</h4>
+                    <p className="text-xs text-on-surface-variant mt-2">{spaces.length} espacios configurados</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-12 gap-8">
-                  <div className="col-span-8 bg-surface-container-lowest rounded-[2rem] p-8 shadow-sm border border-surface-container-low">
-                    <h3 className="text-lg font-bold text-on-surface mb-6">Tendencia de Gastos</h3>
-                    <div className="h-64 w-full">
+                {/* MEJORA 2: Cards de Desglose - Fila 2: Métricas del período */}
+                <div className="grid grid-cols-4 gap-4">
+                  <motion.div
+                    key={`gasto-${dashboardPeriod}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-gradient-to-br from-primary to-primary-container rounded-2xl p-5 text-white"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <TrendingUp className="w-4 h-4 opacity-80" />
+                      <span className="text-[10px] uppercase tracking-[0.15em] font-bold opacity-80">Gasto del Período</span>
+                    </div>
+                    <p className="text-2xl font-extrabold">${dashboardTotalGasto.toLocaleString('es-CL')}</p>
+                    <p className="text-xs opacity-70 mt-1">{dashboardInvoices.length} facturas</p>
+                  </motion.div>
+                  <motion.div
+                    key={`iva-${dashboardPeriod}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.05 }}
+                    className="bg-surface-container-lowest rounded-2xl p-5 border border-surface-container-low shadow-sm"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <Percent className="w-4 h-4 text-amber-500" />
+                      <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">IVA Acumulado</span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-on-surface">${dashboardTotalIva.toLocaleString('es-CL')}</p>
+                    <p className="text-xs text-on-surface-variant mt-1">{settings.ivaRate * 100}% del neto</p>
+                  </motion.div>
+                  <motion.div
+                    key={`prom-${dashboardPeriod}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="bg-surface-container-lowest rounded-2xl p-5 border border-surface-container-low shadow-sm"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <Target className="w-4 h-4 text-indigo-500" />
+                      <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Promedio / Factura</span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-on-surface">${Math.round(dashboardPromedioPorFactura).toLocaleString('es-CL')}</p>
+                    <p className="text-xs text-on-surface-variant mt-1">por documento</p>
+                  </motion.div>
+                  <motion.div
+                    key={`esp-${dashboardPeriod}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.15 }}
+                    className="bg-surface-container-lowest rounded-2xl p-5 border border-surface-container-low shadow-sm"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <Layers className="w-4 h-4 text-emerald-500" />
+                      <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-on-surface-variant">Espacios Usados</span>
+                    </div>
+                    <p className="text-2xl font-extrabold text-on-surface">{dashboardEspaciosActivos}</p>
+                    <p className="text-xs text-on-surface-variant mt-1">{dashboardProveedoresUnicos} proveedores</p>
+                  </motion.div>
+                </div>
+
+                {/* Row: Tendencia + MEJORA 3: Top Proveedores */}
+                <div className="grid grid-cols-12 gap-6">
+                  {/* Tendencia de Gastos */}
+                  <div className="col-span-7 bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <h3 className="text-base font-bold text-on-surface mb-5">Tendencia de Gastos</h3>
+                    <div className="h-52 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData}>
+                        <LineChart data={dashboardChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(value) => `$${value / 1000}k`} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v) => `$${v / 1000}k`} />
                           <Tooltip
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                             formatter={(value: number) => [`$${value.toLocaleString('es-CL')}`, 'Total']}
                           />
-                          <Line type="monotone" dataKey="total" stroke="#1e293b" strokeWidth={3} dot={{ r: 4, fill: '#1e293b' }} activeDot={{ r: 6 }} />
+                          <Line type="monotone" dataKey="total" stroke="#1a1a8f" strokeWidth={3} dot={{ r: 4, fill: '#1a1a8f' }} activeDot={{ r: 6 }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
-                  <div className="col-span-4 bg-surface-container-lowest rounded-[2rem] p-8 shadow-sm border border-surface-container-low">
-                    <h3 className="text-lg font-bold text-on-surface mb-6">Distribución por Proveedor</h3>
-                    <div className="h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={providerData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {providerData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={['#1e293b', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0'][index % 5]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
+
+                  {/* MEJORA 3: Top Proveedores con detalle */}
+                  <div className="col-span-5 bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <div className="flex items-center justify-between mb-5">
+                      <h3 className="text-base font-bold text-on-surface">Top Proveedores</h3>
+                      <span className="text-xs text-on-surface-variant font-semibold bg-surface-container-low px-2 py-1 rounded-lg">Top 5</span>
                     </div>
+                    {dashboardTopProviders.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-40 text-on-surface-variant">
+                        <Building2 className="w-8 h-8 mb-2 opacity-30" />
+                        <p className="text-sm">Sin datos en el período</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {dashboardTopProviders.map((prov, idx) => (
+                          <div key={prov.name} className="group">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-[10px] font-bold text-on-surface-variant w-4 flex-shrink-0">#{idx + 1}</span>
+                                <p className="text-sm font-semibold text-on-surface truncate">{prov.name}</p>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                <span className="text-[10px] text-on-surface-variant">{prov.count} fact.</span>
+                                <span className="text-sm font-bold text-on-surface">${prov.total.toLocaleString('es-CL')}</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${prov.pct}%` }}
+                                transition={{ duration: 0.6, delay: idx * 0.08 }}
+                                className={`h-full rounded-full ${
+                                  idx === 0 ? 'bg-primary' : idx === 1 ? 'bg-primary/70' : idx === 2 ? 'bg-primary/50' : 'bg-primary/30'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* MEJORA 4: Gasto por Espacio + MEJORA 5: Últimas Facturas */}
+                <div className="grid grid-cols-12 gap-6">
+                  {/* MEJORA 4: Gasto por Espacio - BarChart horizontal */}
+                  <div className="col-span-6 bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <h3 className="text-base font-bold text-on-surface mb-5">Gasto por Espacio</h3>
+                    {dashboardSpaceData.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-40 text-on-surface-variant">
+                        <Folder className="w-8 h-8 mb-2 opacity-30" />
+                        <p className="text-sm">Sin gastos en espacios para este período</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {(() => {
+                          const maxTotal = dashboardSpaceData[0]?.total || 1;
+                          const colorMap: Record<string, string> = {
+                            blue: '#3b82f6', orange: '#f97316', indigo: '#6366f1',
+                            emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b',
+                            purple: '#a855f7', teal: '#14b8a6',
+                          };
+                          return dashboardSpaceData.map((space, idx) => (
+                            <div key={space.name}>
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-sm font-semibold text-on-surface">{space.name}</p>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-on-surface-variant">{space.count} fact.</span>
+                                  <span className="text-sm font-bold text-on-surface">${space.total.toLocaleString('es-CL')}</span>
+                                </div>
+                              </div>
+                              <div className="h-2 bg-surface-container-high rounded-full overflow-hidden">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${Math.round((space.total / maxTotal) * 100)}%` }}
+                                  transition={{ duration: 0.6, delay: idx * 0.07 }}
+                                  style={{ backgroundColor: colorMap[space.color] || '#94a3b8' }}
+                                  className="h-full rounded-full"
+                                />
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* MEJORA 5: Últimas Facturas - Feed de Actividad */}
+                  <div className="col-span-6 bg-surface-container-lowest rounded-[2rem] p-7 shadow-sm border border-surface-container-low">
+                    <div className="flex items-center justify-between mb-5">
+                      <h3 className="text-base font-bold text-on-surface">Actividad Reciente</h3>
+                      <button
+                        id="dashboard-ver-todas-facturas"
+                        onClick={() => setActiveTab('Facturas')}
+                        className="flex items-center gap-1 text-xs text-primary font-bold hover:underline"
+                      >
+                        Ver todas <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {dashboardRecentInvoices.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-40 text-on-surface-variant">
+                        <Receipt className="w-8 h-8 mb-2 opacity-30" />
+                        <p className="text-sm">Sin facturas registradas</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {dashboardRecentInvoices.map((inv) => {
+                          const space = spaces.find(s => s.id === inv.spaceId);
+                          const spaceColor = space ? (SPACE_COLORS.find(c => c.name === space.color) || SPACE_COLORS[0]) : null;
+                          return (
+                            <button
+                              key={inv.id}
+                              id={`dashboard-invoice-${inv.id}`}
+                              onClick={() => setDetailInvoice(inv)}
+                              className="w-full flex items-center justify-between bg-surface-container-low hover:bg-surface-container-high rounded-xl px-4 py-3 transition-all group"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-8 h-8 ${inv.color} rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0`}>
+                                  {inv.initials}
+                                </div>
+                                <div className="text-left min-w-0">
+                                  <p className="text-sm font-semibold text-on-surface truncate">{inv.proveedor}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-[11px] text-on-surface-variant">{inv.fecha}</p>
+                                    {space && spaceColor && (
+                                      <span className={`text-[10px] font-bold ${spaceColor.text} ${spaceColor.bg} px-1.5 py-0.5 rounded-md`}>
+                                        {space.nombre}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-sm font-bold text-on-surface">${inv.valorTotal.toLocaleString('es-CL')}</span>
+                                <ChevronRight className="w-4 h-4 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -1668,10 +2011,14 @@ export default function App() {
                     onCommitProveedor={addSavedProveedor}
                     onRemoveSavedProveedor={removeSavedProveedor}
                     onImportProveedoresFromInvoices={handleImportProveedoresFromInvoices}
-                    importProveedoresDisabled={invoices.length === 0}
+                    importProveedoresDisabled={invoicesForProveedorImport.length === 0}
+                    importProveedoresTitle={importProveedoresTitle}
                   />
 
-                  <div className="bg-surface-container-lowest rounded-[2rem] overflow-hidden shadow-sm border border-surface-container-low">
+                  <div
+                    id="facturas-registro"
+                    className="bg-surface-container-lowest rounded-[2rem] overflow-hidden shadow-sm border border-surface-container-low scroll-mt-24"
+                  >
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-surface-container-low/50">

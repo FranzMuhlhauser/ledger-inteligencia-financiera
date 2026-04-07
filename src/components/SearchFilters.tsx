@@ -21,6 +21,7 @@ interface SearchFiltersProps {
   onRemoveSavedProveedor: (name: string) => void;
   onImportProveedoresFromInvoices: () => void;
   importProveedoresDisabled: boolean;
+  importProveedoresTitle: string;
 }
 
 export default function SearchFilters({
@@ -34,6 +35,7 @@ export default function SearchFilters({
   onRemoveSavedProveedor,
   onImportProveedoresFromInvoices,
   importProveedoresDisabled,
+  importProveedoresTitle,
 }: SearchFiltersProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
 
@@ -109,11 +111,7 @@ export default function SearchFilters({
                 disabled={importProveedoresDisabled}
                 onClick={onImportProveedoresFromInvoices}
                 className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed shrink-0"
-                title={
-                  importProveedoresDisabled
-                    ? 'Cargá facturas primero'
-                    : 'Agregar a la lista todos los proveedores que aparecen en tus facturas cargadas'
-                }
+                title={importProveedoresTitle}
               >
                 Importar desde facturas
               </button>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Hash, X } from 'lucide-react';
+import { Calendar, Check, Hash, X } from 'lucide-react';
 import { SearchPreferences } from '../hooks/useSearchFilters';
 import ProveedorFilterField from './ProveedorFilterField';
 
@@ -18,6 +18,8 @@ interface HeaderSearchFiltersProps {
   onRemoveSavedProveedor: (name: string) => void;
   onImportProveedoresFromInvoices: () => void;
   importProveedoresDisabled: boolean;
+  importProveedoresTitle: string;
+  onApplyFilters: () => void;
 }
 
 export default function HeaderSearchFilters({
@@ -30,6 +32,8 @@ export default function HeaderSearchFilters({
   onRemoveSavedProveedor,
   onImportProveedoresFromInvoices,
   importProveedoresDisabled,
+  importProveedoresTitle,
+  onApplyFilters,
 }: HeaderSearchFiltersProps) {
   const headerActive =
     filters.tipoDocumento !== 'todos' ||
@@ -50,7 +54,8 @@ export default function HeaderSearchFilters({
         <div>
           <p className="text-sm font-bold text-on-surface">Filtros</p>
           <p className="text-xs text-on-surface-variant mt-0.5">
-            Combiná varios criterios para acotar facturas y boletas.
+            Combiná varios criterios para acotar facturas y boletas. «Importar desde facturas» usa el rango de fechas de
+            Análisis y/o año, mes y día de aquí.
           </p>
         </div>
         {headerActive && (
@@ -111,11 +116,7 @@ export default function HeaderSearchFilters({
               disabled={importProveedoresDisabled}
               onClick={onImportProveedoresFromInvoices}
               className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed shrink-0"
-              title={
-                importProveedoresDisabled
-                  ? 'Cargá facturas primero'
-                  : 'Agregar a la lista todos los proveedores que aparecen en tus facturas cargadas'
-              }
+              title={importProveedoresTitle}
             >
               Importar desde facturas
             </button>
@@ -204,6 +205,17 @@ export default function HeaderSearchFilters({
             className="w-full bg-surface-container-low border-none rounded-xl py-2 px-3 text-sm focus:ring-2 focus:ring-primary/20"
           />
         </div>
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-surface-container-low flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onApplyFilters}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-primary/90 transition-colors"
+        >
+          <Check className="w-4 h-4" aria-hidden />
+          Listo — ver resultados
+        </button>
       </div>
     </div>
   );

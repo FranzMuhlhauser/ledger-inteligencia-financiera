@@ -1,0 +1,1 @@
+src/App.tsx(970,39): error TS2339: Property 'proveedor' does not exist on type '{ fecha: string; }'.
