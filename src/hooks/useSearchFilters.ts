@@ -143,6 +143,24 @@ export function useSearchFilters() {
     });
   }, []);
 
+  const applyFilters = useCallback((prefs: SearchPreferences) => {
+    setFilters(prefs);
+  }, []);
+
+  /** Limpia tipo, proveedor, espacio, número y fecha; mantiene el texto de búsqueda y filtros de valor/archivo. */
+  const clearStructuredFilters = useCallback(() => {
+    setFilters((prev) => ({
+      ...prev,
+      tipoDocumento: 'todos',
+      proveedor: undefined,
+      spaceId: undefined,
+      numeroFactura: undefined,
+      fechaAnio: undefined,
+      fechaMes: undefined,
+      fechaDia: undefined,
+    }));
+  }, []);
+
   const hasActiveFilters = useMemo(() => {
     return (
       filters.searchQuery.trim() !== '' ||
@@ -159,5 +177,5 @@ export function useSearchFilters() {
     );
   }, [filters]);
 
-  return { filters, updateFilter, clearFilters, hasActiveFilters };
+  return { filters, updateFilter, clearFilters, applyFilters, clearStructuredFilters, hasActiveFilters };
 }

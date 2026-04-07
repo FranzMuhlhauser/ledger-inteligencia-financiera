@@ -46,6 +46,7 @@ import {
 import EditSpaceModal from './components/EditSpaceModal';
 import InvoiceDetailModal from './components/InvoiceDetailModal';
 import SearchFilters from './components/SearchFilters';
+import HeaderSearchFilters from './components/HeaderSearchFilters';
 import RecentSearches from './components/RecentSearches';
 import { exportToCSV, exportToPDF } from './utils/export';
 import { processFileForUpload } from './utils/imageCompression';
@@ -376,14 +377,36 @@ export default function App() {
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
 
   // Search state with debounce and filters
-  const { filters: searchFilters, updateFilter, clearFilters, hasActiveFilters } = useSearchFilters();
+  const { filters: searchFilters, updateFilter, clearFilters, applyFilters, clearStructuredFilters, hasActiveFilters } = useSearchFilters();
   const { recentSearches, addSearch, removeSearch, clearSearches } = useRecentSearches(10);
   const [showRecentSearches, setShowRecentSearches] = useState(false);
   const [isHoveringRecent, setIsHoveringRecent] = useState(false);
   const [showFiltersPanel, setShowFiltersPanel] = useState(true);
+  const [showHeaderFilters, setShowHeaderFilters] = useState(false);
+  const headerSearchAreaRef = useRef<HTMLDivElement>(null);
 
   // Debounced search query (300ms delay)
   const debouncedSearchQuery = useDebounce(searchFilters.searchQuery, 300);
+
+  useEffect(() => {
+    if (!showHeaderFilters) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (headerSearchAreaRef.current && !headerSearchAreaRef.current.contains(e.target as Node)) {
+        setShowHeaderFilters(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [showHeaderFilters]);
+
+  useEffect(() => {
+    if (!showHeaderFilters) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowHeaderFilters(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showHeaderFilters]);
 
   // --- Date Filter State (for Analysis tab) ---
   const today = new Date().toISOString().split('T')[0];
@@ -630,10 +653,11 @@ export default function App() {
         }
       }
 
-      // Fecha Día filter
+      // Fecha Día filter (fecha en ISO usa día con cero a la izquierda)
       if (searchFilters.fechaDia) {
-        const invDay = inv.fecha.slice(8, 10); // Extract DD from YYYY-MM-DD
-        if (invDay !== searchFilters.fechaDia) {
+        const invDay = inv.fecha.slice(8, 10);
+        const dayFilter = String(searchFilters.fechaDia).padStart(2, '0');
+        if (invDay !== dayFilter) {
           return false;
         }
       }
@@ -946,7 +970,7 @@ export default function App() {
       <main className="flex-1 ml-60 flex flex-col">
         {/* Header */}
         <header className="h-20 bg-surface-container-lowest flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm/5" role="banner">
-          <div className="relative w-96">
+          <div ref={headerSearchAreaRef} className="relative w-full max-w-md min-w-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant w-4 h-4" aria-hidden="true" />
             <input
               ref={searchInputRef}
@@ -969,6 +993,10 @@ export default function App() {
                       proveedor: searchFilters.proveedor,
                       conArchivo: searchFilters.conArchivo,
                       spaceId: searchFilters.spaceId,
+                      numeroFactura: searchFilters.numeroFactura,
+                      fechaAnio: searchFilters.fechaAnio,
+                      fechaMes: searchFilters.fechaMes,
+                      fechaDia: searchFilters.fechaDia,
                     });
                   }
                   setShowRecentSearches(false);
@@ -996,13 +1024,16 @@ export default function App() {
                 </button>
               )}
               <button
+                type="button"
                 onClick={() => {
-                  document.querySelector('.bg-surface-container-lowest')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  setShowHeaderFilters((open) => !open);
+                  setShowRecentSearches(false);
                 }}
-                className={`p-1.5 rounded-lg transition-all ${hasActiveFilters ? 'bg-primary text-white shadow-md' : 'hover:bg-surface-container-high text-on-surface-variant'
+                className={`p-1.5 rounded-lg transition-all ${showHeaderFilters || hasActiveFilters ? 'bg-primary text-white shadow-md' : 'hover:bg-surface-container-high text-on-surface-variant'
                   }`}
-                aria-label="Ir a filtros"
-                title="Ir a filtros avanzados"
+                aria-expanded={showHeaderFilters}
+                aria-label="Abrir o cerrar filtros de búsqueda"
+                title="Filtros: tipo, fecha, proveedor, número, espacio"
               >
                 <Filter className="w-4 h-4" />
               </button>
@@ -1023,12 +1054,40 @@ export default function App() {
                     onRemoveSearch={removeSearch}
                     onClearAll={clearSearches}
                     onSelectSearch={(search) => {
-                      updateFilter('searchQuery', search.query);
-                      if (search.filters.tipoDocumento) updateFilter('tipoDocumento', search.filters.tipoDocumento);
-                      if (search.filters.conArchivo) updateFilter('conArchivo', search.filters.conArchivo);
+                      applyFilters({
+                        searchQuery: search.query,
+                        tipoDocumento: search.filters.tipoDocumento ?? 'todos',
+                        valorMinimo: search.filters.valorMinimo,
+                        valorMaximo: search.filters.valorMaximo,
+                        proveedor: search.filters.proveedor,
+                        conArchivo: search.filters.conArchivo,
+                        spaceId: search.filters.spaceId,
+                        numeroFactura: search.filters.numeroFactura,
+                        fechaAnio: search.filters.fechaAnio,
+                        fechaMes: search.filters.fechaMes,
+                        fechaDia: search.filters.fechaDia,
+                      });
                       setShowRecentSearches(false);
                       setIsHoveringRecent(false);
                     }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {showHeaderFilters && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <HeaderSearchFilters
+                    filters={searchFilters}
+                    onUpdateFilter={updateFilter}
+                    onClearStructured={clearStructuredFilters}
+                    spaces={spaces}
                   />
                 </motion.div>
               )}
